@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>v86 Offline Desktop - Windows Longhorn Edition</title>
+    <!-- Requires local libv86.js file in the same folder -->
+    <script src="libv86.js"></script>
+</head>
+<body style="margin:0; padding:0; background:#111; color:#fff; font-family:sans-serif; text-align:center;">
+
+    <h2 style="margin-top:20px;">v86 Windows Longhorn Booter</h2>
+    <p>Ensure libv86.js, v86.wasm, seabios.bin, and vgabios.bin are in this local folder.</p>
+
+    <div style="margin: 20px;">
+        <label style="background:#333; padding:10px; border-radius:5px; cursor:pointer; border:1px solid #555;">
+            Select Longhorn Image (.img / .iso)
+            <input type="file" id="disk_file" style="display:none;">
+        </label>
+        
+        <label style="margin-left: 15px;">
+            RAM Size:
+            <select id="ram_size" style="background:#333; color:#fff; padding:8px; border-radius:5px; border:1px solid #555;">
+                <option value="256">256 MB (Minimum)</option>
+                <option value="512" selected>512 MB (Recommended)</option>
+                <option value="1024">1024 MB (May lag WebAssembly)</option>
+            </select>
+        </label>
+
+        <button id="start_btn" style="background:#0088cc; color:#fff; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; margin-left:15px; cursor:pointer;">Boot Longhorn</button>
+    </div>
+
+    <!-- The emulator screen canvas -->
+    <div style="white-space: pre; font-family: Courier, monospace; line-height: 14px; margin: 20px auto; display: inline-block; border: 4px solid #333;" id="screen_container"></div>
+
+    <script>
+        let emulator = null;
+        document.getElementById('start_btn').onclick = function() {
+            const fileInput = document.getElementById('disk_file');
+            if (fileInput.files.length === 0) {
+                alert("Please select your Windows Longhorn image file first!");
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const ramAllocation = parseInt(document.getElementById('ram_size').value);
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const buffer = e.target.result;
+                
+                const config = {
+                    wasm_path: "v86.wasm",
+                    screen_container: document.getElementById("screen_container"),
+                    bios: { url: "seabios.bin" },
+                    vga_bios: { url: "vgabios.bin" },
+                    memory_size: ramAllocation * 1024 * 1024, // Dynamically set requested RAM
+                    vga_memory_size: 16 * 1024 * 1024, // Boost video memory for Windows GUI
+                    autostart: true
+                };
+
+                // Treat as CD-ROM installer if file ends with .iso, otherwise mount as Primary Hard Drive (hda)
+                if (file.name.toLowerCase().endsWith('.iso')) {
+                    config.cdrom = { buffer: buffer };
+                } else {
+                    config.hda = { buffer: buffer };
+                }
+
+                try {
+                    emulator = new V86Starter(config);
+                    console.log("v86 initialized successfully with " + ramAllocation + "MB RAM.");
+                } catch (err) {
+                    alert("Initialization error: " + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        };
+    </script>
+</body>
+</html>
