@@ -82,6 +82,9 @@
         #screen_container canvas { display: block; }
         .status { margin-top: 10px; font-style: italic; color: #bfa; font-size: 13px; text-align: center; }
         .error { color: #f28b82; font-weight: bold; }
+        .stats { margin-top: 6px; font-family: Consolas, Menlo, monospace; font-size: 12px; color: #9aa0a6; text-align: center; max-width: 850px; }
+        .led { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #3c4043; margin-right: 8px; vertical-align: middle; }
+        .led.on { background: #34a853; box-shadow: 0 0 6px #34a853; }
     </style>
 
     <!-- v86 engine core (loads libv86.js from the same folder) -->
@@ -157,6 +160,7 @@
 
     <!-- The emulator screen layout -->
     <div id="screen_container"><div></div><canvas></canvas></div>
+    <div id="stats" class="stats"></div>
     <div id="status-text" class="status error">The page script has not started. If this message stays, your browser blocked or failed to run it (try reloading, or open it in a normal Chrome tab).</div>
 
     <script>
@@ -168,6 +172,42 @@
         const overHttp = location.protocol === 'http:' || location.protocol === 'https:';
         let emulator = null;
         let heartbeat = null;
+
+
+        // ---- Live stats (like copy.sh/v86): running time, CPU speed, disk bytes read/written ----
+        const statsEl = $('stats');
+        let statTimer = null, io = null;
+        function fmtBytes(n) {
+            if (n < 1024) return n + " B";
+            const u = ["KB", "MB", "GB"]; let i = -1;
+            do { n /= 1024; i++; } while (n >= 1024 && i < 2);
+            return n.toFixed(n < 10 ? 2 : 1) + " " + u[i];
+        }
+        function stopStats() { if (statTimer) { clearInterval(statTimer); statTimer = null; } }
+        function startStats(e) {
+            stopStats();
+            io = { t0: Date.now(), read: {}, write: {}, lastIO: 0, lastCount: 0, lastT: Date.now(), mips: 0 };
+            const add = (m, d) => { m[d[0]] = (m[d[0]] || 0) + d[1]; io.lastIO = Date.now(); };
+            e.add_listener('ide-read-start', () => { io.lastIO = Date.now(); });
+            e.add_listener('ide-read-end',  d => add(io.read, d));
+            e.add_listener('ide-write-end', d => add(io.write, d));
+            statTimer = setInterval(() => {
+                const now = Date.now();
+                let count = io.lastCount;
+                try { count = e.get_instruction_counter(); } catch (x) {}
+                if (now - io.lastT >= 1000) {
+                    io.mips = (count - io.lastCount) / ((now - io.lastT) / 1000) / 1e6;
+                    io.lastCount = count; io.lastT = now;
+                }
+                const sec = Math.floor((now - io.t0) / 1000);
+                const time = String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0");
+                const ago = io.lastIO ? Math.round((now - io.lastIO) / 1000) + "s ago" : "none yet";
+                const led = (now - io.lastIO) < 400 ? "led on" : "led";
+                const disk = (ch, name) => name + ": read " + fmtBytes(io.read[ch] || 0) + ", written " + fmtBytes(io.write[ch] || 0);
+                statsEl.innerHTML = '<span class="' + led + '"></span>Running ' + time + ' &middot; CPU ' + io.mips.toFixed(1) +
+                    ' MIPS' + (io.mips < 0.05 ? ' (CPU idle)' : '') + ' &middot; ' + (io.lastCount / 1e6).toFixed(0) + 'M instructions &middot; ' + disk(0, "Hard disk") + ' &middot; ' + disk(1, "CD-ROM") + ' &middot; last disk activity: ' + ago;
+            }, 250);
+        }
 
         function stopHeartbeat() { if (heartbeat) { clearInterval(heartbeat); heartbeat = null; } }
         const benign = m => /worklet/i.test(String(m));   // audio worklet can't load from file://; harmless
@@ -216,6 +256,7 @@
 
         function stopEmulator() {
             stopHeartbeat();
+            stopStats();
             if (emulator) {
                 try { emulator.destroy(); } catch (e) { console.error(e); }
                 emulator = null;
@@ -278,6 +319,7 @@
                 if (cdrom && !hda) options.boot_order = 0x123;   // CD first when there's no hard disk
 
                 emulator = new V86(options);
+                startStats(emulator);
                 emulator.add_listener('emulator-ready', () => {
                     stopHeartbeat();
                     setStatus("Running. Click the screen to capture keyboard/mouse.");
