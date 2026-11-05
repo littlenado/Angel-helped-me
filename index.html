@@ -84,32 +84,37 @@
         .error { color: #f28b82; font-weight: bold; }
     </style>
 
-    <!-- STEP 1: PASTE THE ENTIRE RAW TEXT OF YOUR 'libv86.js' FILE DIRECTLY INSIDE THESE TAGS -->
-    <script id="embedded-v86-core">
-        // [Open your 'libv86.js' file, copy everything, and paste it here]
-        // [This embeds the engine core permanently inside this single index.html file]
-    </script>
+    <!-- v86 engine core (loads libv86.js from the same folder) -->
+    <script src="libv86.js"></script>
 </head>
 <body>
 
     <h1>v86 Chromebook Workspace</h1>
     <div class="instructions">
-        Standalone Single-File Edition. Double-click to launch offline from your files application.<br>
-        Feed in the engine binary and firmware blocks, map your drives, and click Boot.
+        Serve this folder over HTTP (e.g. <code>python3 -m http.server</code>) and the engine + firmware load automatically &mdash; you only pick a disk / ISO.<br>
+        Opened straight from disk (file://)? Pick the three files in section 1 by hand.
     </div>
     
     <div class="panel">
         <div class="grid">
             <!-- ENGINE CORE BINARIES -->
             <div class="section">
-                <h3>1. System Binaries & Firmware (Required)</h3>
+                <h3>1. System Binaries & Firmware (auto-loaded over HTTP)</h3>
                 <div class="row">
                     <label for="local-wasm">v86 Engine Binary (v86.wasm):</label>
                     <input type="file" id="local-wasm" accept=".wasm">
                 </div>
                 <div class="row">
-                    <label for="local-bios">System BIOS (bios.bin-1.10.0 / seabios.bin):</label>
+                    <label for="local-bios">System BIOS (seabios.bin / bios.bin-1.10.0):</label>
                     <input type="file" id="local-bios" accept=".bin">
+                </div>
+                <div class="row">
+                    <label for="bios-default">BIOS used when auto-loading:</label>
+                    <select id="bios-default">
+                        <option value="seabios.bin" selected>seabios.bin</option>
+                        <option value="bios.bin-1.10.0">bios.bin-1.10.0</option>
+                        <option value="seabios-debug.bin">seabios-debug.bin</option>
+                    </select>
                 </div>
                 <div class="row">
                     <label for="local-vga">Video VGA BIOS (vgabios.bin):</label>
@@ -145,81 +150,117 @@
                         <option value="512" selected>Windows XP Configuration (512MB RAM)</option>
                     </select>
                 </div>
-                <button id="start-btn">Boot Emulator</button>
+                <div><button id="stop-btn" disabled>Stop</button> <button id="start-btn">Boot Emulator</button></div>
             </div>
         </div>
     </div>
 
     <!-- The emulator screen layout -->
-    <div id="screen_container"></div>
-    <div id="status-text" class="status">Waiting for binary blocks... Please connect files above.</div>
+    <div id="screen_container"><div></div><canvas></canvas></div>
+    <div id="status-text" class="status">Loading...</div>
 
     <script>
-        const startBtn = document.getElementById('start-btn');
-        const osSelect = document.getElementById('os-select');
-        const statusText = document.getElementById('status-text');
+        const $ = id => document.getElementById(id);
+        const startBtn = $('start-btn');
+        const stopBtn = $('stop-btn');
+        const osSelect = $('os-select');
+        const statusText = $('status-text');
+        const overHttp = location.protocol === 'http:' || location.protocol === 'https:';
+        let emulator = null;
 
-        // Automatic script presence checks on interface lifecycle
+        function setStatus(msg, isError) {
+            statusText.className = isError ? 'status error' : 'status';
+            statusText.innerText = msg;
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
-            if (typeof V86Starter === 'undefined') {
-                statusText.className = "status error";
-                statusText.innerText = "Error: You must paste the contents of 'libv86.js' into the index.html script tag first.";
+            if (typeof V86 === 'undefined') {
+                setStatus("Error: libv86.js did not load. Keep it in the same folder as index.html.", true);
+                startBtn.disabled = true;
+            } else if (overHttp) {
+                setStatus("Engine ready. Firmware loads automatically - choose a disk image and/or ISO, then Boot.");
             } else {
-                statusText.innerText = "Internal JavaScript engine active. Feed your binary payload files to boot.";
+                setStatus("Opened from disk (file://): pick v86.wasm, a BIOS and vgabios.bin in section 1, plus a disk or ISO.");
             }
         });
 
+        // Use a picked file if there is one, otherwise fetch it from this folder (HTTP only).
+        async function loadBinary(inputId, url, label) {
+            const picked = $(inputId).files[0];
+            if (picked) return picked.arrayBuffer();
+            if (!overHttp) throw new Error(label + " is required - pick it in section 1 (or serve this folder over HTTP).");
+            const r = await fetch(url);
+            if (!r.ok) throw new Error("Could not fetch " + url + " (HTTP " + r.status + ").");
+            return r.arrayBuffer();
+        }
+
+        function stopEmulator() {
+            if (emulator) {
+                try { emulator.destroy(); } catch (e) { console.error(e); }
+                emulator = null;
+            }
+            stopBtn.disabled = true;
+            startBtn.disabled = false;
+        }
+        stopBtn.addEventListener('click', () => { stopEmulator(); setStatus("Stopped."); });
+
         startBtn.addEventListener('click', async () => {
-            if (typeof V86Starter === 'undefined') {
-                statusText.className = "status error";
-                statusText.innerText = "Error: Cannot boot. The embedded 'libv86.js' script is missing inside head tags.";
+            if (typeof V86 === 'undefined') return;
+
+            const hda = $('local-hda').files[0];
+            const cdrom = $('local-cdrom').files[0];
+            const fda = $('local-fda').files[0];
+            if (!hda && !cdrom && !fda) {
+                setStatus("Pick at least one of: hard disk image, ISO, or floppy image.", true);
                 return;
             }
 
-            const wasmFiles = document.getElementById('local-wasm').files;
-            const biosFiles = document.getElementById('local-bios').files;
-            const vgaFiles = document.getElementById('local-vga').files;
-            const hdaFiles = document.getElementById('local-hda').files;
-            const cdromFiles = document.getElementById('local-cdrom').files;
-            const fdaFiles = document.getElementById('local-fda').files;
-
-            if (wasmFiles.length === 0 || biosFiles.length === 0 || vgaFiles.length === 0 || hdaFiles.length === 0) {
-                statusText.className = "status error";
-                statusText.innerText = "Error: WASM, System BIOS, VGA BIOS, and a Hard Disk (.img) are all strictly required.";
-                return;
-            }
-
-            statusText.className = "status";
-            statusText.innerText = "Streaming binary objects into hardware workspace buffers... Please wait.";
+            stopEmulator();
             startBtn.disabled = true;
-
-            const ramSize = parseInt(osSelect.value) * 1024 * 1024;
-            
-            // Build the architecture using local execution layers to bypass ChromeOS sandboxing blocks
-            const emulatorOptions = {
-                disable_worker: true, // Forces execution inside foreground document window
-                wasm_fn: async function(m) {
-                    const bytes = await wasmFiles[0].arrayBuffer();
-                    const result = await WebAssembly.instantiate(bytes, m);
-                    return result.instance;
-                },
-                bios: { buffer: await biosFiles[0].arrayBuffer() },
-                vga_bios: { buffer: await vgaFiles[0].arrayBuffer() },
-                hda: { buffer: await hdaFiles[0].arrayBuffer() },
-                screen_container: document.getElementById("screen_container"),
-                memory_size: ramSize,
-                vga_memory_size: ramSize >= 512*1024*1024 ? 16*1024*1024 : 8*1024*1024,
-                bios_eager_init: true,
-                acpi: false
-            };
-
-            if (cdromFiles.length > 0) {
-                emulatorOptions.cdrom = { buffer: await cdromFiles[0].arrayBuffer() };
-            }
-            if (fdaFiles.length > 0) {
-                emulatorOptions.fda = { buffer: await fdaFiles[0].arrayBuffer() };
-            }
+            setStatus("Loading engine and firmware...");
 
             try {
-                document.getElementById("screen_container").innerHTML = "";
-                
+                const [wasmBytes, biosBytes, vgaBytes] = await Promise.all([
+                    loadBinary('local-wasm', 'v86.wasm', 'v86.wasm'),
+                    loadBinary('local-bios', $('bios-default').value, 'The system BIOS'),
+                    loadBinary('local-vga', 'vgabios.bin', 'vgabios.bin'),
+                ]);
+
+                const ramMB = parseInt(osSelect.value);
+                const options = {
+                    // v86 expects the module's *exports*, not the Instance object.
+                    wasm_fn: async (imports) => {
+                        const { instance } = await WebAssembly.instantiate(wasmBytes, imports);
+                        return instance.exports;
+                    },
+                    bios: { buffer: biosBytes },
+                    vga_bios: { buffer: vgaBytes },
+                    screen_container: $('screen_container'),
+                    memory_size: ramMB * 1024 * 1024,
+                    vga_memory_size: (ramMB >= 512 ? 16 : 8) * 1024 * 1024,
+                    acpi: false,
+                    autostart: true,
+                };
+                // File objects are streamed by v86 itself, so big ISOs/images don't get copied into one huge buffer.
+                if (hda)   options.hda   = { buffer: hda };
+                if (cdrom) options.cdrom = { buffer: cdrom };
+                if (fda)   options.fda   = { buffer: fda };
+                if (cdrom && !hda) options.boot_order = 0x123;   // CD first when there's no hard disk
+
+                emulator = new V86(options);
+                emulator.add_listener('emulator-ready', () => {
+                    setStatus("Running. Click the screen to capture keyboard/mouse.");
+                    stopBtn.disabled = false;
+                });
+                emulator.add_listener('download-progress', e => {
+                    if (e.lengthComputable) setStatus("Loading " + e.file_name + " ... " + Math.round(e.loaded / e.total * 100) + "%");
+                });
+            } catch (err) {
+                console.error(err);
+                setStatus("Boot failed: " + err.message, true);
+                stopEmulator();
+            }
+        });
+    </script>
+</body>
+</html>
