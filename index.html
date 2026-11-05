@@ -157,7 +157,7 @@
 
     <!-- The emulator screen layout -->
     <div id="screen_container"><div></div><canvas></canvas></div>
-    <div id="status-text" class="status">Loading...</div>
+    <div id="status-text" class="status error">The page script has not started. If this message stays, your browser blocked or failed to run it (try reloading, or open it in a normal Chrome tab).</div>
 
     <script>
         const $ = id => document.getElementById(id);
@@ -167,6 +167,15 @@
         const statusText = $('status-text');
         const overHttp = location.protocol === 'http:' || location.protocol === 'https:';
         let emulator = null;
+        let heartbeat = null;
+
+        function stopHeartbeat() { if (heartbeat) { clearInterval(heartbeat); heartbeat = null; } }
+        const benign = m => /worklet/i.test(String(m));   // audio worklet can't load from file://; harmless
+        window.addEventListener('error', e => { if (!benign(e.message)) { stopHeartbeat(); setStatus("Script error: " + e.message, true); } });
+        window.addEventListener('unhandledrejection', e => {
+            const m = (e.reason && e.reason.message) || e.reason;
+            if (!benign(m)) { stopHeartbeat(); setStatus("Error: " + m, true); }
+        });
 
         function setStatus(msg, isError) {
             statusText.className = isError ? 'status error' : 'status';
@@ -206,6 +215,7 @@
         }
 
         function stopEmulator() {
+            stopHeartbeat();
             if (emulator) {
                 try { emulator.destroy(); } catch (e) { console.error(e); }
                 emulator = null;
@@ -228,7 +238,16 @@
 
             stopEmulator();
             startBtn.disabled = true;
-            setStatus("Loading engine and firmware...");
+            const names = [hda, cdrom, fda].filter(Boolean).map(f => f.name + " (" + Math.round(f.size / 1048576) + " MB)").join(", ");
+            const t0 = Date.now();
+            stopHeartbeat();
+            heartbeat = setInterval(() => {
+                const sec = Math.round((Date.now() - t0) / 1000);
+                setStatus("Starting... " + sec + "s  [" + names + "]" + (sec > 30
+                    ? "  Still waiting. Try closing other tabs, or a smaller RAM preset."
+                    : ""));
+            }, 1000);
+            setStatus("Starting... [" + names + "]");
 
             try {
                 const [wasmBytes, biosBytes, vgaBytes] = await Promise.all([
@@ -260,6 +279,7 @@
 
                 emulator = new V86(options);
                 emulator.add_listener('emulator-ready', () => {
+                    stopHeartbeat();
                     setStatus("Running. Click the screen to capture keyboard/mouse.");
                     stopBtn.disabled = false;
                 });
@@ -268,6 +288,7 @@
                 });
             } catch (err) {
                 console.error(err);
+                stopHeartbeat();
                 setStatus("Boot failed: " + err.message, true);
                 stopEmulator();
             }
