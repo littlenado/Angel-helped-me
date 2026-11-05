@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>v86 Chromebook Standalone VM</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #202124;
+            color: #f1f3f4;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { margin-bottom: 5px; color: #34a853; }
+        .instructions { font-size: 13px; color: #9aa0a6; margin-bottom: 15px; text-align: center; max-width: 600px; }
+        .panel {
+            background-color: #292a2d;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+            max-width: 850px;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .section {
+            background-color: #35363a;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #5f6368;
+        }
+        .section h3 { margin: 0 0 10px 0; font-size: 14px; color: #8ab4f8; border-bottom: 1px solid #5f6368; padding-bottom: 4px;}
+        .row { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 12px; font-weight: bold; color: #bdc1c6; }
+        select, button, input[type="file"]::file-selector-button {
+            padding: 8px 12px;
+            font-size: 13px;
+            border-radius: 4px;
+            border: 1px solid #5f6368;
+            background-color: #202124;
+            color: #fff;
+            cursor: pointer;
+        }
+        input[type="file"] { font-size: 12px; color: #bdc1c6; }
+        .boot-row {
+            grid-column: span 2;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 15px;
+            border-top: 1px solid #5f6368;
+        }
+        #start-btn {
+            background-color: #34a853;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            padding: 10px 24px;
+            border: none;
+        }
+        #start-btn:hover { background-color: #2c8c46; }
+        #start-btn:disabled { background-color: #1e2022; color: #70757a; cursor: not-allowed; }
+        #screen_container {
+            white-space: pre;
+            font-family: Courier, monospace;
+            font-size: 14px;
+            line-height: 14px;
+            background-color: #000;
+            border: 4px solid #3c4043;
+            border-radius: 4px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        #screen_container canvas { display: block; }
+        .status { margin-top: 10px; font-style: italic; color: #bfa; font-size: 13px; text-align: center; }
+        .error { color: #f28b82; font-weight: bold; }
+    </style>
+
+    <!-- STEP 1: PASTE THE ENTIRE RAW TEXT OF YOUR 'libv86.js' FILE DIRECTLY INSIDE THESE TAGS -->
+    <script id="embedded-v86-core">
+        // [Open your 'libv86.js' file, copy everything, and paste it here]
+        // [This embeds the engine core permanently inside this single index.html file]
+    </script>
+</head>
+<body>
+
+    <h1>v86 Chromebook Workspace</h1>
+    <div class="instructions">
+        Standalone Single-File Edition. Double-click to launch offline from your files application.<br>
+        Feed in the engine binary and firmware blocks, map your drives, and click Boot.
+    </div>
+    
+    <div class="panel">
+        <div class="grid">
+            <!-- ENGINE CORE BINARIES -->
+            <div class="section">
+                <h3>1. System Binaries & Firmware (Required)</h3>
+                <div class="row">
+                    <label for="local-wasm">v86 Engine Binary (v86.wasm):</label>
+                    <input type="file" id="local-wasm" accept=".wasm">
+                </div>
+                <div class="row">
+                    <label for="local-bios">System BIOS (bios.bin-1.10.0 / seabios.bin):</label>
+                    <input type="file" id="local-bios" accept=".bin">
+                </div>
+                <div class="row">
+                    <label for="local-vga">Video VGA BIOS (vgabios.bin):</label>
+                    <input type="file" id="local-vga" accept=".bin">
+                </div>
+            </div>
+
+            <!-- MACHINE STORAGE DRIVES -->
+            <div class="section">
+                <h3>2. Virtual Hard Drives & Installation Media</h3>
+                <div class="row">
+                    <label for="local-hda">Primary Hard Disk Image (.img Target Storage):</label>
+                    <input type="file" id="local-hda" accept=".img,.raw">
+                </div>
+                <div class="row">
+                    <label for="local-cdrom">Operating System OS Installer (.iso CD-ROM):</label>
+                    <input type="file" id="local-cdrom" accept=".iso,.img">
+                </div>
+                <div class="row">
+                    <label for="local-fda">Setup Floppy Disk Image (.img Bootloader - Optional):</label>
+                    <input type="file" id="local-fda" accept=".img,.ima">
+                </div>
+            </div>
+
+            <!-- HARDWARE TUNING & TRIGGER -->
+            <div class="boot-row">
+                <div>
+                    <label for="os-select" style="display:block; margin-bottom:4px;">Target Operating System Profile RAM Preset:</label>
+                    <select id="os-select">
+                        <option value="64">Windows 95 Configuration (64MB RAM)</option>
+                        <option value="128">Windows NT 4.0 Configuration (128MB RAM)</option>
+                        <option value="256">Windows 2000 Configuration (256MB RAM)</option>
+                        <option value="512" selected>Windows XP Configuration (512MB RAM)</option>
+                    </select>
+                </div>
+                <button id="start-btn">Boot Emulator</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- The emulator screen layout -->
+    <div id="screen_container"></div>
+    <div id="status-text" class="status">Waiting for binary blocks... Please connect files above.</div>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const osSelect = document.getElementById('os-select');
+        const statusText = document.getElementById('status-text');
+
+        // Automatic script presence checks on interface lifecycle
+        window.addEventListener('DOMContentLoaded', () => {
+            if (typeof V86Starter === 'undefined') {
+                statusText.className = "status error";
+                statusText.innerText = "Error: You must paste the contents of 'libv86.js' into the index.html script tag first.";
+            } else {
+                statusText.innerText = "Internal JavaScript engine active. Feed your binary payload files to boot.";
+            }
+        });
+
+        startBtn.addEventListener('click', async () => {
+            if (typeof V86Starter === 'undefined') {
+                statusText.className = "status error";
+                statusText.innerText = "Error: Cannot boot. The embedded 'libv86.js' script is missing inside head tags.";
+                return;
+            }
+
+            const wasmFiles = document.getElementById('local-wasm').files;
+            const biosFiles = document.getElementById('local-bios').files;
+            const vgaFiles = document.getElementById('local-vga').files;
+            const hdaFiles = document.getElementById('local-hda').files;
+            const cdromFiles = document.getElementById('local-cdrom').files;
+            const fdaFiles = document.getElementById('local-fda').files;
+
+            if (wasmFiles.length === 0 || biosFiles.length === 0 || vgaFiles.length === 0 || hdaFiles.length === 0) {
+                statusText.className = "status error";
+                statusText.innerText = "Error: WASM, System BIOS, VGA BIOS, and a Hard Disk (.img) are all strictly required.";
+                return;
+            }
+
+            statusText.className = "status";
+            statusText.innerText = "Streaming binary objects into hardware workspace buffers... Please wait.";
+            startBtn.disabled = true;
+
+            const ramSize = parseInt(osSelect.value) * 1024 * 1024;
+            
+            // Build the architecture using local execution layers to bypass ChromeOS sandboxing blocks
+            const emulatorOptions = {
+                disable_worker: true, // Forces execution inside foreground document window
+                wasm_fn: async function(m) {
+                    const bytes = await wasmFiles[0].arrayBuffer();
+                    const result = await WebAssembly.instantiate(bytes, m);
+                    return result.instance;
+                },
+                bios: { buffer: await biosFiles[0].arrayBuffer() },
+                vga_bios: { buffer: await vgaFiles[0].arrayBuffer() },
+                hda: { buffer: await hdaFiles[0].arrayBuffer() },
+                screen_container: document.getElementById("screen_container"),
+                memory_size: ramSize,
+                vga_memory_size: ramSize >= 512*1024*1024 ? 16*1024*1024 : 8*1024*1024,
+                bios_eager_init: true,
+                acpi: false
+            };
+
+            if (cdromFiles.length > 0) {
+                emulatorOptions.cdrom = { buffer: await cdromFiles[0].arrayBuffer() };
+            }
+            if (fdaFiles.length > 0) {
+                emulatorOptions.fda = { buffer: await fdaFiles[0].arrayBuffer() };
+            }
+
+            try {
+                document.getElementById("screen_container").innerHTML = "";
+                
