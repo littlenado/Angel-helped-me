@@ -84,6 +84,7 @@
         .error { color: #f28b82; font-weight: bold; }
         .stats { margin-top: 6px; font-family: Consolas, Menlo, monospace; font-size: 12px; color: #9aa0a6; text-align: center; max-width: 850px; }
         [hidden] { display: none !important; }
+        input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 8px; background: #202124; color: #e8eaed; border: 1px solid #5f6368; border-radius: 4px; font-family: Consolas, Menlo, monospace; }
         .hint { font-size: 12px; color: #9aa0a6; white-space: pre-line; }
         .filerow { display: flex; gap: 6px; align-items: center; }
         .filerow input[type="file"] { flex: 1; min-width: 0; }
@@ -960,6 +961,26 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 </div>
             </div>
 
+            <!-- NETWORK -->
+            <div class="section">
+                <h3>3. Network (optional)</h3>
+                <div class="row">
+                    <label for="net-mode">Internet connection:</label>
+                    <select id="net-mode">
+                        <option value="off" selected>Off (cable unplugged)</option>
+                        <option value="relay">Public relay: wss://relay.widgetry.org/ (experimental, may be offline)</option>
+                        <option value="custom">My own WebSocket relay (full network)</option>
+                        <option value="wisp">Wisp proxy server (TCP only)</option>
+                        <option value="fetch">Browser fetch (HTTP websites only)</option>
+                    </select>
+                </div>
+                <div class="row" id="net-url-row" hidden>
+                    <label for="net-url" id="net-url-label">Server address:</label>
+                    <input type="text" id="net-url" spellcheck="false" autocomplete="off">
+                </div>
+                <div id="net-help" class="hint"></div>
+            </div>
+
             <!-- HARDWARE TUNING & TRIGGER -->
             <div class="boot-row">
                 <div>
@@ -1029,11 +1050,18 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
         function stopStats() { if (statTimer) { clearInterval(statTimer); statTimer = null; } }
         function startStats(e) {
             stopStats();
-            io = { t0: Date.now(), read: {}, write: {}, lastIO: 0, lastCount: 0, lastT: Date.now(), mips: 0 };
+            io = { t0: Date.now(), read: {}, write: {}, lastIO: 0, lastCount: 0, lastT: Date.now(), mips: 0, rx: 0, tx: 0, net: false };
             const add = (m, d) => { m[d[0]] = (m[d[0]] || 0) + d[1]; io.lastIO = Date.now(); };
             e.add_listener('ide-read-start', () => { io.lastIO = Date.now(); });
             e.add_listener('ide-read-end',  d => add(io.read, d));
             e.add_listener('ide-write-end', d => add(io.write, d));
+            e.add_listener('net0-send', d => { io.tx += d.length; });
+            // Frames *to* the guest are sent by the adapter on this same bus, so a listener never hears them. Count them by wrapping send().
+            const bus = e.bus, origSend = bus.send;
+            bus.send = function (name, data, ...rest) {
+                if (name === 'net0-receive' && data && data.length) io.rx += data.length;
+                return origSend.call(this, name, data, ...rest);
+            };
             statTimer = setInterval(() => {
                 const now = Date.now();
                 let count = io.lastCount;
@@ -1048,7 +1076,8 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 const led = (now - io.lastIO) < 400 ? "led on" : "led";
                 const disk = (ch, name) => name + ": read " + fmtBytes(io.read[ch] || 0) + ", written " + fmtBytes(io.write[ch] || 0);
                 statsEl.innerHTML = '<span class="' + led + '"></span>Running ' + time + ' &middot; CPU ' + io.mips.toFixed(1) +
-                    ' MIPS' + (io.mips < 0.05 ? ' (CPU idle)' : '') + ' &middot; ' + (io.lastCount / 1e6).toFixed(0) + 'M instructions &middot; ' + disk(0, "Hard disk") + ' &middot; ' + disk(1, "CD-ROM") + ' &middot; last disk activity: ' + ago;
+                    ' MIPS' + (io.mips < 0.05 ? ' (CPU idle)' : '') + ' &middot; ' + (io.lastCount / 1e6).toFixed(0) + 'M instructions &middot; ' + disk(0, "Hard disk") + ' &middot; ' + disk(1, "CD-ROM") + ' &middot; last disk activity: ' + ago +
+                    (io.net ? '<br>Network: ' + netLinkState() + ' &middot; received ' + fmtBytes(io.rx) + ' &middot; sent ' + fmtBytes(io.tx) : '');
             }, 250);
         }
 
@@ -1218,6 +1247,70 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             if (on && guestMouse) captureMouse();
         });
 
+        // ---- Network: emulated NE2000 PCI card + one of several backends ----
+        const NET_PUBLIC_RELAY = "wss://relay.widgetry.org/";
+        const NET_MODES = {
+            off:    { help: "The virtual network card stays unplugged (Windows may still list it, with no connection)." },
+            relay:  { help: "Uses a free public relay run by the v86 author. It may be slow, rate-limited or offline, and anyone running the relay can see your traffic, so don't log in to anything important." },
+            custom: { url: true, label: "WebSocket relay address (ws:// or wss://):", ph: "wss://your-relay.example.com/",
+                      help: "A relay that speaks raw Ethernet frames and provides DHCP and DNS (for example websockproxy or go-websockproxy)." },
+            wisp:   { url: true, label: "Wisp server address (wisp:// or wisps://):", ph: "wisps://your-wisp-server.example.com/",
+                      help: "A Wisp server (for example wisp-js or epoxy-tls). TCP only, so no UDP and no ping. DNS goes through Cloudflare over HTTPS." },
+            fetch:  { url: true, label: "CORS proxy prefix (optional):", ph: "https://your-cors-proxy.example.com/?url=",
+                      help: "Turns the guest's plain HTTP requests (port 80) into browser fetch() calls. No HTTPS, and most sites block this unless you give a CORS proxy. Fine for testing, weak for real browsing." }
+        };
+        const netModeEl = $('net-mode'), netUrlEl = $('net-url');
+        function loadNetPrefs() {
+            try {
+                const p = JSON.parse(localStorage.getItem('v86-net') || '{}');
+                if (p.mode && NET_MODES[p.mode]) netModeEl.value = p.mode;
+                if (p.urls) netUrlEl.dataset.urls = JSON.stringify(p.urls);
+            } catch (e) {}
+        }
+        function netUrls() { try { return JSON.parse(netUrlEl.dataset.urls || '{}'); } catch (e) { return {}; } }
+        function saveNetPrefs() {
+            try { localStorage.setItem('v86-net', JSON.stringify({ mode: netModeEl.value, urls: netUrls() })); } catch (e) {}
+        }
+        function renderNetUI() {
+            const m = NET_MODES[netModeEl.value];
+            $('net-url-row').hidden = !m.url;
+            if (m.url) { $('net-url-label').textContent = m.label; netUrlEl.placeholder = m.ph; netUrlEl.value = netUrls()[netModeEl.value] || ''; }
+            $('net-help').textContent = m.help;
+        }
+        netModeEl.addEventListener('change', () => { renderNetUI(); saveNetPrefs(); });
+        netUrlEl.addEventListener('input', () => { const u = netUrls(); u[netModeEl.value] = netUrlEl.value.trim(); netUrlEl.dataset.urls = JSON.stringify(u); saveNetPrefs(); });
+        loadNetPrefs(); renderNetUI();
+
+        // Returns the v86 net_device options for the chosen mode, or null for "off". Throws a readable Error on bad input.
+        function buildNetDevice() {
+            const mode = netModeEl.value;
+            if (mode === 'off') return null;
+            const typed = netUrlEl.value.trim();
+            const secure = location.protocol === 'https:';
+            const checkWs = (u, schemes) => {
+                if (!schemes.some(sc => u.toLowerCase().startsWith(sc))) throw new Error("The address must start with " + schemes.join(" or ") + ".");
+                if (secure && /^(ws|wisp):\/\//i.test(u)) throw new Error("This page is loaded over https, so the browser blocks insecure ws:// addresses. Use wss:// or wisps://.");
+            };
+            if (mode === 'relay') return { type: 'ne2k', relay_url: NET_PUBLIC_RELAY };
+            if (mode === 'custom') { checkWs(typed, ['ws://', 'wss://']); return { type: 'ne2k', relay_url: typed }; }
+            if (mode === 'wisp') {
+                let u = typed.replace(/^wss:\/\//i, 'wisps://').replace(/^ws:\/\//i, 'wisp://');
+                checkWs(u, ['wisp://', 'wisps://']);
+                return { type: 'ne2k', relay_url: u };
+            }
+            // fetch
+            const dev = { type: 'ne2k', relay_url: 'fetch' };
+            if (typed) dev.cors_proxy = typed;
+            return dev;
+        }
+        function netLinkState() {
+            const a = emulator && emulator.network_adapter;
+            if (!a) return '';
+            const ws = a.socket || a.wispws;
+            if (!ws) return a.url !== undefined ? 'idle (connects when the OS first uses the network)' : 'built-in (no server needed)';
+            return ['connecting...', 'connected', 'closing...', 'NOT connected'][ws.readyState] || '';
+        }
+
         // ---- Floppy install sets: swap disks while the emulator runs ----
         let floppyDisks = [], floppyIdx = 0;
         const fdBar = $('floppy-bar'), fdSel = $('fd-select');
@@ -1337,8 +1430,11 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 const bootOrder = parseInt($('boot-select').value);
                 if (bootOrder) options.boot_order = bootOrder;   // otherwise v86 picks a default from the drives present
 
+                const net = buildNetDevice();
+                if (net) options.net_device = net;
                 emulator = new V86(options);
                 startStats(emulator);
+                io.net = !!net;
                 emulator.add_listener('emulator-ready', () => {
                     stopHeartbeat();
                     setStatus("Running.");
