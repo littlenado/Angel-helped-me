@@ -89,6 +89,7 @@
         .filerow { display: flex; gap: 6px; align-items: center; }
         .filerow input[type="file"] { flex: 1; min-width: 0; }
         .clear { padding: 4px 9px; }
+        .blank { max-width: 170px; }
         .toolbar { margin-top: 8px; display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; max-width: 850px; }
         .toolbar button:disabled { opacity: .45; cursor: not-allowed; }
         .boot-row select { max-width: 270px; }
@@ -141,9 +142,16 @@ Aa.prototype.get=function(a,b,c,d){var e=this.get_from_cache(a,b);if(e)c(e);else
 signal:d?.signal})};Aa.prototype.get_from_cache=wa.prototype.get_from_cache;Aa.prototype.get_and_cache=wa.prototype.get_and_cache;Aa.prototype.set=wa.prototype.set;Aa.prototype.handle_read=wa.prototype.handle_read;Aa.prototype.get_state=wa.prototype.get_state;Aa.prototype.set_state=wa.prototype.set_state;
 function Ba(a){this.file=a;this.byteLength=a.size;1073741824<a.size&&console.warn("SyncFileBuffer: Allocating buffer of "+(a.size>>20)+" MB ...");this.buffer=new ArrayBuffer(a.size);this.onprogress=this.onload=void 0}Ba.prototype.load=function(){this.load_next(0)};
 Ba.prototype.load_next=function(a){var b=new FileReader;b.onload=function(d){d=new Uint8Array(d.target.result);(new Uint8Array(this.buffer,a)).set(d);this.load_next(a+4194304)}.bind(this);if(this.onprogress)this.onprogress({loaded:a,total:this.byteLength,lengthComputable:!0});if(a<this.byteLength){var c=this.file.slice(a,Math.min(a+4194304,this.byteLength));b.readAsArrayBuffer(c)}else this.file=void 0,this.onload&&this.onload({buffer:this.buffer})};Ba.prototype.get=z.prototype.get;
-Ba.prototype.get_and_cache=z.prototype.get_and_cache;Ba.prototype.get_from_cache=z.prototype.get_from_cache;Ba.prototype.set=z.prototype.set;Ba.prototype.get_buffer=z.prototype.get_buffer;Ba.prototype.get_state=z.prototype.get_state;Ba.prototype.set_state=z.prototype.set_state;function Ca(a){this.file=a;this.byteLength=a.size;this.block_cache=new Map;this.block_cache_is_write=new Set;this.onprogress=this.onload=void 0}Ca.prototype.load=function(){this.onload&&this.onload(Object.create(null))};
-Ca.prototype.get=function(a,b,c){var d=this.get_from_cache(a,b);d?c(d):(d=new FileReader,d.onload=function(e){e=new Uint8Array(e.target.result);this.handle_read(a,b,e);c(e)}.bind(this),d.readAsArrayBuffer(this.file.slice(a,a+b)))};Ca.prototype.get_from_cache=wa.prototype.get_from_cache;Ca.prototype.get_and_cache=wa.prototype.get_and_cache;Ca.prototype.set=wa.prototype.set;Ca.prototype.handle_read=wa.prototype.handle_read;Ca.prototype.get_state=wa.prototype.get_state;Ca.prototype.set_state=wa.prototype.set_state;
-Ca.prototype.get_buffer=function(a){a()};Ca.prototype.get_as_file=function(a){for(var b=[],c=Array.from(this.block_cache.keys()).sort(function(h,m){return h-m}),d=0,e=0;e<c.length;e++){var f=c[e],g=this.block_cache.get(f);f*=256;f!==d&&(b.push(this.file.slice(d,f)),d=f);b.push(g);d+=g.length}d!==this.file.size&&b.push(this.file.slice(d));return new File(b,a)};
+Ba.prototype.get_and_cache=z.prototype.get_and_cache;Ba.prototype.get_from_cache=z.prototype.get_from_cache;Ba.prototype.set=z.prototype.set;Ba.prototype.get_buffer=z.prototype.get_buffer;Ba.prototype.get_state=z.prototype.get_state;Ba.prototype.set_state=z.prototype.set_state;function Ca(a){this.file=a;this.byteLength=a.size;this.cx=new Map;this.block_cache=new Map;this.block_cache_is_write=new Set;this.onprogress=this.onload=void 0}Ca.prototype.load=function(){this.onload&&this.onload(Object.create(null))};
+Ca.prototype.get=function(a,b,c){var d=this.get_from_cache(a,b);d?c(d):(d=new FileReader,d.onload=function(e){e=new Uint8Array(e.target.result);this.handle_read(a,b,e);c(e)}.bind(this),d.readAsArrayBuffer(this.file.slice(a,a+b)))};/* LOCAL PATCH (not upstream): file-backed disks (class Ca) keep written sectors in 16 KB chunks with a per-sector "written" map,
+   instead of one JS object per 256-byte block. Same behaviour, about 1x memory instead of about 2.7x of the data written. */
+Ca.prototype.get_from_cache=function(a,b){const n=Math.ceil(b/512),s=a>>9;for(let i=0;i<n;i++){const c=this.cx.get((s+i)>>5);if(!c||!c.m[(s+i)&31])return}const o=new Uint8Array(b);for(let i=0;i<n;i++){const k=s+i,c=this.cx.get(k>>5),p=(k&31)<<9,sub=c.d.subarray(p,p+512);o.set(sub.length>b-(i<<9)?sub.subarray(0,b-(i<<9)):sub,i<<9)}return o};
+Ca.prototype.get_and_cache=function(a,b,c,d){this.get(a,b,c,d)};
+Ca.prototype.set=function(a,b,cb){const n=Math.ceil(b.length/512),s=a>>9;for(let i=0;i<n;i++){const k=s+i,ci=k>>5;let c=this.cx.get(ci);if(!c){c={d:new Uint8Array(16384),m:new Uint8Array(32)};this.cx.set(ci,c)}c.d.set(b.subarray(i<<9,(i+1)<<9),(k&31)<<9);c.m[k&31]=1}cb()};
+Ca.prototype.handle_read=function(a,b,e){const n=Math.ceil(b/512),s=a>>9;for(let i=0;i<n;i++){const k=s+i,c=this.cx.get(k>>5);if(c&&c.m[k&31]){const p=(k&31)<<9,sub=c.d.subarray(p,p+512);e.set(sub.length>e.length-(i<<9)?sub.subarray(0,e.length-(i<<9)):sub,i<<9)}}};
+Ca.prototype.get_state=function(){const a=[],b=[];for(const [k,c] of this.cx)for(let i=0;i<32;i++)if(c.m[i]){const q=(k*32+i)*2;b.push([q,c.d.slice(i*512,i*512+256)],[q+1,c.d.slice(i*512+256,i*512+512)])}a[0]=b;return a};
+Ca.prototype.set_state=function(a){this.cx=new Map;for(const [q,d] of a[0]){const sec=q>>1,k=sec>>5,i=sec&31;let c=this.cx.get(k);if(!c){c={d:new Uint8Array(16384),m:new Uint8Array(32)};this.cx.set(k,c)}c.d.set(d,i*512+(q&1)*256);c.m[i]=1}};
+Ca.prototype.get_buffer=function(a){a()};Ca.prototype.get_as_file=function(a){const b=[],ks=Array.from(this.cx.keys()).sort((x,y)=>x-y);let pos=0;for(const k of ks){const c=this.cx.get(k),base=k*16384;let i=0;while(i<32){if(!c.m[i]){i++;continue}let j=i;while(j<32&&c.m[j])j++;const off=base+i*512;off!==pos&&b.push(this.file.slice(pos,off));b.push(c.d.slice(i*512,j*512));pos=base+j*512;i=j}}pos!==this.file.size&&b.push(this.file.slice(pos));return new File(b,a)};
 function Da(a,b){if(a.buffer instanceof ArrayBuffer)return new z(a.buffer);if("undefined"!==typeof File&&a.buffer instanceof File)return b=a.async,void 0===b&&(b=268435456<=a.buffer.size),b?new Ca(a.buffer):new Ba(a.buffer);if(a.url)return a.use_parts?new Aa(a.url,a.size,a.fixed_chunk_size,!1,b):new wa(a.url,a.size,a.fixed_chunk_size)};function A(a){this.cpu=a;this.channel_page=new Uint8Array(8);this.channel_pagehi=new Uint8Array(8);this.channel_addr=new Uint16Array(8);this.channel_addr_init=new Uint16Array(8);this.channel_count=new Uint16Array(8);this.channel_count_init=new Uint16Array(8);this.channel_mask=new Uint8Array(8);this.channel_mode=new Uint8Array(8);this.unmask_listeners=[];this.lsb_msb_flipflop=0;a=a.io;a.register_write(0,this,this.port_addr_write.bind(this,0));a.register_write(2,this,this.port_addr_write.bind(this,
 1));a.register_write(4,this,this.port_addr_write.bind(this,2));a.register_write(6,this,this.port_addr_write.bind(this,3));a.register_write(1,this,this.port_count_write.bind(this,0));a.register_write(3,this,this.port_count_write.bind(this,1));a.register_write(5,this,this.port_count_write.bind(this,2));a.register_write(7,this,this.port_count_write.bind(this,3));a.register_read(0,this,this.port_addr_read.bind(this,0));a.register_read(2,this,this.port_addr_read.bind(this,1));a.register_read(4,this,this.port_addr_read.bind(this,
 2));a.register_read(6,this,this.port_addr_read.bind(this,3));a.register_read(1,this,this.port_count_read.bind(this,0));a.register_read(3,this,this.port_count_read.bind(this,1));a.register_read(5,this,this.port_count_read.bind(this,2));a.register_read(7,this,this.port_count_read.bind(this,3));a.register_write(192,this,this.port_addr_write.bind(this,4));a.register_write(196,this,this.port_addr_write.bind(this,5));a.register_write(200,this,this.port_addr_write.bind(this,6));a.register_write(204,this,
@@ -952,13 +960,14 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                     <div class="filerow"><input type="file" id="local-fdb" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-fdb" title="Clear this drive">&times;</button></div>
                 </div>
                 <div class="row">
-                    <label for="local-hda">Hard disk A (.img / .raw):</label>
-                    <div class="filerow"><input type="file" id="local-hda" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hda" title="Clear this drive">&times;</button></div>
+                    <label for="local-hda">Hard disk A (.img / .raw), or a blank disk made on the spot:</label>
+                    <div class="filerow"><input type="file" id="local-hda" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hda" title="Clear this drive">&times;</button> <select id="blank-hda" class="blank" title="Use a blank virtual disk instead of a file"><option value="">or blank disk...</option><option value="2">Blank 2 GB</option><option value="10">Blank 10 GB</option></select></div>
                 </div>
                 <div class="row">
                     <label for="local-hdb">Hard disk B (optional):</label>
-                    <div class="filerow"><input type="file" id="local-hdb" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hdb" title="Clear this drive">&times;</button></div>
+                    <div class="filerow"><input type="file" id="local-hdb" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hdb" title="Clear this drive">&times;</button> <select id="blank-hdb" class="blank" title="Use a blank virtual disk instead of a file"><option value="">or blank disk...</option><option value="2">Blank 2 GB</option><option value="10">Blank 10 GB</option></select></div>
                 </div>
+                <div class="hint">Blank disks start empty and cost no storage: only what the OS writes is kept, in memory, so everything on them is lost when you press Stop or close the page. Windows 2000/XP Setup can partition and format a blank disk itself (pick the quick format). Windows 95/98 need FDISK and FORMAT first. Installing XP can use 1-2 GB of memory on top of the emulator's own.</div>
             </div>
 
             <!-- NETWORK -->
@@ -1183,7 +1192,24 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             e.preventDefault();
             if (e.dataTransfer && e.dataTransfer.files.length) autoAssign(e.dataTransfer.files);
         });
-        document.querySelectorAll('.clear').forEach(btn => btn.addEventListener('click', () => { $(btn.dataset.for).value = ''; }));
+        document.querySelectorAll('.clear').forEach(btn => btn.addEventListener('click', () => {
+            $(btn.dataset.for).value = '';
+            const blank = $('blank-' + btn.dataset.for.replace('local-', ''));
+            if (blank) blank.value = '';
+        }));
+
+        // Blank virtual hard disk: one 1 MB block of zeros referenced N times, so a 10 GB disk takes no real memory or storage.
+        // v86 only keeps the sectors the OS actually writes.
+        function makeBlankDisk(gb) {
+            const zero = new Blob([new ArrayBuffer(1048576)]);
+            return new File(new Array(gb * 1024).fill(zero), "Blank " + gb + " GB hard disk.img");
+        }
+        function pickDisk(slot) {          // a chosen file wins over the blank-disk dropdown
+            const f = $('local-' + slot).files[0];
+            if (f) return f;
+            const gb = parseInt($('blank-' + slot).value);
+            return gb ? makeBlankDisk(gb) : undefined;
+        }
 
         // ---- Screen toolbar: fullscreen, mouse capture, Ctrl+Alt+Del ----
         const fsBtn = $('fs-btn'), mouseBtn = $('mouse-btn'), cadBtn = $('cad-btn'), mouseHint = $('mouse-hint');
@@ -1368,7 +1394,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
         startBtn.addEventListener('click', async () => {
             if (typeof V86 === 'undefined') return;
 
-            const hda = $('local-hda').files[0], hdb = $('local-hdb').files[0];
+            const hda = pickDisk('hda'), hdb = pickDisk('hdb');
             const cdrom = $('local-cdrom').files[0];
             floppyDisks = naturalSort(Array.from($('local-fda').files));
             floppyIdx = 0;
