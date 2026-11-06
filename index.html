@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>v86 Chromebook Standalone VM</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #202124;
+            color: #f1f3f4;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { margin-bottom: 5px; color: #34a853; }
+        .instructions { font-size: 13px; color: #9aa0a6; margin-bottom: 15px; text-align: center; max-width: 600px; }
+        .panel {
+            background-color: #292a2d;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+            max-width: 850px;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .section {
+            background-color: #35363a;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #5f6368;
+        }
+        .section h3 { margin: 0 0 10px 0; font-size: 14px; color: #8ab4f8; border-bottom: 1px solid #5f6368; padding-bottom: 4px;}
+        .row { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 12px; font-weight: bold; color: #bdc1c6; }
+        select, button, input[type="file"]::file-selector-button {
+            padding: 8px 12px;
+            font-size: 13px;
+            border-radius: 4px;
+            border: 1px solid #5f6368;
+            background-color: #202124;
+            color: #fff;
+            cursor: pointer;
+        }
+        input[type="file"] { font-size: 12px; color: #bdc1c6; }
+        .boot-row {
+            grid-column: span 2;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 15px;
+            border-top: 1px solid #5f6368;
+        }
+        #start-btn {
+            background-color: #34a853;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            padding: 10px 24px;
+            border: none;
+        }
+        #start-btn:hover { background-color: #2c8c46; }
+        #start-btn:disabled { background-color: #1e2022; color: #70757a; cursor: not-allowed; }
+        #screen_container {
+            white-space: pre;
+            font-family: Courier, monospace;
+            font-size: 14px;
+            line-height: 14px;
+            background-color: #000;
+            border: 4px solid #3c4043;
+            border-radius: 4px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        #screen_container canvas { display: block; }
+        .status { margin-top: 10px; font-style: italic; color: #bfa; font-size: 13px; text-align: center; }
+        .error { color: #f28b82; font-weight: bold; }
+    </style>
+
+    <!-- v86 engine core (loads libv86.js from the same folder) -->
+    <script src="libv86.js"></script>
+</head>
+<body>
+
+    <h1>v86 Chromebook Workspace</h1>
+    <div class="instructions">
+        Serve this folder over HTTP (e.g. <code>python3 -m http.server</code>) and the engine + firmware load automatically &mdash; you only pick a disk / ISO.<br>
+        Opened straight from disk (file://)? Pick the three files in section 1 by hand.
+    </div>
+    
+    <div class="panel">
+        <div class="grid">
+            <!-- ENGINE CORE BINARIES -->
+            <div class="section">
+                <h3>1. System Binaries & Firmware (auto-loaded over HTTP)</h3>
+                <div class="row">
+                    <label for="local-wasm">v86 Engine Binary (v86.wasm):</label>
+                    <input type="file" id="local-wasm" accept=".wasm">
+                </div>
+                <div class="row">
+                    <label for="local-bios">System BIOS (seabios.bin / bios.bin-1.10.0):</label>
+                    <input type="file" id="local-bios" accept=".bin">
+                </div>
+                <div class="row">
+                    <label for="bios-default">BIOS used when auto-loading:</label>
+                    <select id="bios-default">
+                        <option value="seabios.bin" selected>seabios.bin</option>
+                        <option value="bios.bin-1.10.0">bios.bin-1.10.0</option>
+                        <option value="seabios-debug.bin">seabios-debug.bin</option>
+                    </select>
+                </div>
+                <div class="row">
+                    <label for="local-vga">Video VGA BIOS (vgabios.bin):</label>
+                    <input type="file" id="local-vga" accept=".bin">
+                </div>
+            </div>
+
+            <!-- MACHINE STORAGE DRIVES -->
+            <div class="section">
+                <h3>2. Virtual Hard Drives & Installation Media</h3>
+                <div class="row">
+                    <label for="local-hda">Primary Hard Disk Image (.img Target Storage):</label>
+                    <input type="file" id="local-hda" accept=".img,.raw">
+                </div>
+                <div class="row">
+                    <label for="local-cdrom">Operating System OS Installer (.iso CD-ROM):</label>
+                    <input type="file" id="local-cdrom" accept=".iso,.img">
+                </div>
+                <div class="row">
+                    <label for="local-fda">Setup Floppy Disk Image (.img Bootloader - Optional):</label>
+                    <input type="file" id="local-fda" accept=".img,.ima">
+                </div>
+            </div>
+
+            <!-- HARDWARE TUNING & TRIGGER -->
+            <div class="boot-row">
+                <div>
+                    <label for="os-select" style="display:block; margin-bottom:4px;">Target Operating System Profile RAM Preset:</label>
+                    <select id="os-select">
+                        <option value="64">Windows 95 Configuration (64MB RAM)</option>
+                        <option value="128">Windows NT 4.0 Configuration (128MB RAM)</option>
+                        <option value="256">Windows 2000 Configuration (256MB RAM)</option>
+                        <option value="512" selected>Windows XP Configuration (512MB RAM)</option>
+                    </select>
+                </div>
+                <div><button id="stop-btn" disabled>Stop</button> <button id="start-btn">Boot Emulator</button></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- The emulator screen layout -->
+    <div id="screen_container"><div></div><canvas></canvas></div>
+    <div id="status-text" class="status error">The page script has not started. If this message stays, your browser blocked or failed to run it (try reloading, or open it in a normal Chrome tab).</div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const startBtn = $('start-btn');
+        const stopBtn = $('stop-btn');
+        const osSelect = $('os-select');
+        const statusText = $('status-text');
+        const overHttp = location.protocol === 'http:' || location.protocol === 'https:';
+        let emulator = null;
+        let heartbeat = null;
+
+        function stopHeartbeat() { if (heartbeat) { clearInterval(heartbeat); heartbeat = null; } }
+        const benign = m => /worklet/i.test(String(m));   // audio worklet can't load from file://; harmless
+        window.addEventListener('error', e => { if (!benign(e.message)) { stopHeartbeat(); setStatus("Script error: " + e.message, true); } });
+        window.addEventListener('unhandledrejection', e => {
+            const m = (e.reason && e.reason.message) || e.reason;
+            if (!benign(m)) { stopHeartbeat(); setStatus("Error: " + m, true); }
+        });
+
+        function setStatus(msg, isError) {
+            statusText.className = isError ? 'status error' : 'status';
+            statusText.innerText = msg;
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.EMBEDDED && window.EMBEDDED['v86.wasm']) {
+                setStatus("Standalone build ready. Choose a disk image and/or ISO, then Boot.");
+                return;
+            }
+            if (typeof V86 === 'undefined') {
+                setStatus("Error: libv86.js did not load. Keep it in the same folder as index.html.", true);
+                startBtn.disabled = true;
+            } else if (overHttp) {
+                setStatus("Engine ready. Firmware loads automatically - choose a disk image and/or ISO, then Boot.");
+            } else {
+                setStatus("Opened from disk (file://): pick v86.wasm, a BIOS and vgabios.bin in section 1, plus a disk or ISO.");
+            }
+        });
+
+        // Use a picked file, else an embedded copy (standalone build), else fetch from this folder (HTTP only).
+        function b64ToBuf(b64) {
+            const bin = atob(b64), u8 = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+            return u8.buffer;
+        }
+        async function loadBinary(inputId, name, label) {
+            const picked = $(inputId).files[0];
+            if (picked) return picked.arrayBuffer();
+            const emb = (window.EMBEDDED || {})[name];
+            if (emb) return b64ToBuf(emb);
+            if (!overHttp) throw new Error(label + " is required - pick it in section 1.");
+            const r = await fetch(name);
+            if (!r.ok) throw new Error("Could not fetch " + name + " (HTTP " + r.status + ").");
+            return r.arrayBuffer();
+        }
+
+        function stopEmulator() {
+            stopHeartbeat();
+            if (emulator) {
+                try { emulator.destroy(); } catch (e) { console.error(e); }
+                emulator = null;
+            }
+            stopBtn.disabled = true;
+            startBtn.disabled = false;
+        }
+        stopBtn.addEventListener('click', () => { stopEmulator(); setStatus("Stopped."); });
+
+        startBtn.addEventListener('click', async () => {
+            if (typeof V86 === 'undefined') return;
+
+            const hda = $('local-hda').files[0];
+            const cdrom = $('local-cdrom').files[0];
+            const fda = $('local-fda').files[0];
+            if (!hda && !cdrom && !fda) {
+                setStatus("Pick at least one of: hard disk image, ISO, or floppy image.", true);
+                return;
+            }
+
+            stopEmulator();
+            startBtn.disabled = true;
+            const names = [hda, cdrom, fda].filter(Boolean).map(f => f.name + " (" + Math.round(f.size / 1048576) + " MB)").join(", ");
+            const t0 = Date.now();
+            stopHeartbeat();
+            heartbeat = setInterval(() => {
+                const sec = Math.round((Date.now() - t0) / 1000);
+                setStatus("Starting... " + sec + "s  [" + names + "]" + (sec > 30
+                    ? "  Still waiting. Try closing other tabs, or a smaller RAM preset."
+                    : ""));
+            }, 1000);
+            setStatus("Starting... [" + names + "]");
+
+            try {
+                const [wasmBytes, biosBytes, vgaBytes] = await Promise.all([
+                    loadBinary('local-wasm', 'v86.wasm', 'v86.wasm'),
+                    loadBinary('local-bios', $('bios-default').value, 'The system BIOS'),
+                    loadBinary('local-vga', 'vgabios.bin', 'vgabios.bin'),
+                ]);
+
+                const ramMB = parseInt(osSelect.value);
+                const options = {
+                    // v86 expects the module's *exports*, not the Instance object.
+                    wasm_fn: async (imports) => {
+                        const { instance } = await WebAssembly.instantiate(wasmBytes, imports);
+                        return instance.exports;
+                    },
+                    bios: { buffer: biosBytes },
+                    vga_bios: { buffer: vgaBytes },
+                    screen_container: $('screen_container'),
+                    memory_size: ramMB * 1024 * 1024,
+                    vga_memory_size: (ramMB >= 512 ? 16 : 8) * 1024 * 1024,
+                    acpi: false,
+                    autostart: true,
+                };
+                // File objects are streamed by v86 itself, so big ISOs/images don't get copied into one huge buffer.
+                if (hda)   options.hda   = { buffer: hda };
+                if (cdrom) options.cdrom = { buffer: cdrom };
+                if (fda)   options.fda   = { buffer: fda };
+                if (cdrom && !hda) options.boot_order = 0x123;   // CD first when there's no hard disk
+
+                emulator = new V86(options);
+                emulator.add_listener('emulator-ready', () => {
+                    stopHeartbeat();
+                    setStatus("Running. Click the screen to capture keyboard/mouse.");
+                    stopBtn.disabled = false;
+                });
+                emulator.add_listener('download-progress', e => {
+                    if (e.lengthComputable) setStatus("Loading " + e.file_name + " ... " + Math.round(e.loaded / e.total * 100) + "%");
+                });
+            } catch (err) {
+                console.error(err);
+                stopHeartbeat();
+                setStatus("Boot failed: " + err.message, true);
+                stopEmulator();
+            }
+        });
+    </script>
+</body>
+</html>
