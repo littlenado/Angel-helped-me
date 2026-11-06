@@ -83,6 +83,17 @@
         .status { margin-top: 10px; font-style: italic; color: #bfa; font-size: 13px; text-align: center; }
         .error { color: #f28b82; font-weight: bold; }
         .stats { margin-top: 6px; font-family: Consolas, Menlo, monospace; font-size: 12px; color: #9aa0a6; text-align: center; max-width: 850px; }
+        .hint { font-size: 12px; color: #9aa0a6; white-space: pre-line; }
+        .filerow { display: flex; gap: 6px; align-items: center; }
+        .filerow input[type="file"] { flex: 1; min-width: 0; }
+        .clear { padding: 4px 9px; }
+        .toolbar { margin-top: 8px; display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; max-width: 850px; }
+        .toolbar button:disabled { opacity: .45; cursor: not-allowed; }
+        .boot-row select { max-width: 270px; }
+        body { padding-bottom: 60vh; }   /* lets the page scroll far enough to put the screen at the top */
+        #screen_container { scroll-margin-top: 12px; }
+        #screen_container, #screen_container * { -webkit-user-select: none; user-select: none; }
+        #screen_container:fullscreen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; border: 0; border-radius: 0; box-shadow: none; overflow: hidden; }
         .led { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #3c4043; margin-right: 8px; vertical-align: middle; }
         .led.on { background: #34a853; box-shadow: 0 0 6px #34a853; }
     </style>
@@ -888,7 +899,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
 
     <h1>v86 Chromebook Workspace</h1>
     <div class="instructions">
-        Standalone build: engine and firmware are built in. Just pick a disk image and/or ISO below, then Boot.
+        Standalone build: engine and firmware are built in. Just pick your disks below, then Boot.
     </div>
     
     <div class="panel">
@@ -920,18 +931,31 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
 
             <!-- MACHINE STORAGE DRIVES -->
             <div class="section">
-                <h3>2. Virtual Hard Drives & Installation Media</h3>
+                <h3>2. Disks: floppy, CD/DVD and hard drives</h3>
                 <div class="row">
-                    <label for="local-hda">Primary Hard Disk Image (.img Target Storage):</label>
-                    <input type="file" id="local-hda" accept=".img,.raw">
+                    <label for="auto-files">Auto-detect: pick (or drop anywhere on the page) any .iso / .img files</label>
+                    <input type="file" id="auto-files" multiple accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw">
+                    <div id="auto-log" class="hint">Each file is sent to the right drive: floppy, CD/DVD or hard disk.</div>
                 </div>
                 <div class="row">
-                    <label for="local-cdrom">Operating System OS Installer (.iso CD-ROM):</label>
-                    <input type="file" id="local-cdrom" accept=".iso,.img">
+                    <label for="local-cdrom">CD / DVD-ROM (.iso, or an .img of a disc):</label>
+                    <div class="filerow"><input type="file" id="local-cdrom" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-cdrom" title="Clear this drive">&times;</button></div>
                 </div>
                 <div class="row">
-                    <label for="local-fda">Setup Floppy Disk Image (.img Bootloader - Optional):</label>
-                    <input type="file" id="local-fda" accept=".img,.ima">
+                    <label for="local-fda">Floppy A (.img, .ima, .vfd, .flp):</label>
+                    <div class="filerow"><input type="file" id="local-fda" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-fda" title="Clear this drive">&times;</button></div>
+                </div>
+                <div class="row">
+                    <label for="local-fdb">Floppy B (optional):</label>
+                    <div class="filerow"><input type="file" id="local-fdb" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-fdb" title="Clear this drive">&times;</button></div>
+                </div>
+                <div class="row">
+                    <label for="local-hda">Hard disk A (.img / .raw):</label>
+                    <div class="filerow"><input type="file" id="local-hda" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hda" title="Clear this drive">&times;</button></div>
+                </div>
+                <div class="row">
+                    <label for="local-hdb">Hard disk B (optional):</label>
+                    <div class="filerow"><input type="file" id="local-hdb" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hdb" title="Clear this drive">&times;</button></div>
                 </div>
             </div>
 
@@ -946,6 +970,15 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                         <option value="512" selected>Windows XP Configuration (512MB RAM)</option>
                     </select>
                 </div>
+                <div>
+                    <label for="boot-select" style="display:block; margin-bottom:4px;">Boot order:</label>
+                    <select id="boot-select">
+                        <option value="" selected>Auto (default)</option>
+                        <option value="291">CD/DVD first</option>
+                        <option value="801">Floppy first</option>
+                        <option value="786">Hard disk first</option>
+                    </select>
+                </div>
                 <div><button id="stop-btn" disabled>Stop</button> <button id="start-btn">Boot Emulator</button></div>
             </div>
         </div>
@@ -953,6 +986,12 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
 
     <!-- The emulator screen layout -->
     <div id="screen_container"><div></div><canvas></canvas></div>
+    <div class="toolbar">
+        <button id="fs-btn" disabled>Fullscreen</button>
+        <button id="mouse-btn" disabled>Capture mouse</button>
+        <button id="cad-btn" disabled>Ctrl+Alt+Del</button>
+        <span id="mouse-hint" class="hint"></span>
+    </div>
     <div id="stats" class="stats"></div>
     <div id="status-text" class="status error">The page script has not started. If this message stays, your browser blocked or failed to run it (try reloading, or open it in a normal Chrome tab).</div>
 
@@ -1003,7 +1042,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
         }
 
         function stopHeartbeat() { if (heartbeat) { clearInterval(heartbeat); heartbeat = null; } }
-        const benign = m => /worklet/i.test(String(m));   // audio worklet can't load from file://; harmless
+        const benign = m => /worklet|pointer.?lock|exited the lock|keyboard.?lock/i.test(String(m));   // audio worklet can't load from file://; harmless
         window.addEventListener('error', e => { if (!benign(e.message)) { stopHeartbeat(); setStatus("Script error: " + e.message, true); } });
         window.addEventListener('unhandledrejection', e => {
             const m = (e.reason && e.reason.message) || e.reason;
@@ -1047,32 +1086,155 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             return r.arrayBuffer();
         }
 
+        // ---- Disks: classify files as floppy / CD-DVD / hard disk ----
+        const FLOPPY_SIZES = new Set([163840, 184320, 327680, 368640, 737280, 1228800, 1474560, 1720320, 1763328, 2949120]);
+        const SLOT_IDS = ['local-cdrom', 'local-fda', 'local-fdb', 'local-hda', 'local-hdb'];
+        const SLOT_NAMES = { 'local-cdrom': 'CD/DVD-ROM', 'local-fda': 'Floppy A', 'local-fdb': 'Floppy B', 'local-hda': 'Hard disk A', 'local-hdb': 'Hard disk B' };
+        const KIND_NAMES = { cdrom: 'CD/DVD', floppy: 'floppy', hdd: 'hard disk' };
+
+        async function looksLikeISO(f) {
+            if (f.size < 0x9006) return false;
+            const b = new Uint8Array(await f.slice(0x8000, 0x9006).arrayBuffer());
+            const at = (o, str) => [...str].every((c, i) => b[o + i] === c.charCodeAt(0));
+            // ISO 9660 ("CD001") or UDF ("BEA01") volume descriptors in sectors 16-18
+            return [1, 0x801, 0x1001].some(o => at(o, 'CD001') || at(o, 'BEA01'));
+        }
+        async function classify(f) {
+            const ext = f.name.split('.').pop().toLowerCase();
+            if (ext === 'iso') return 'cdrom';
+            if (FLOPPY_SIZES.has(f.size)) return 'floppy';
+            if (await looksLikeISO(f)) return 'cdrom';
+            return 'hdd';
+        }
+        function putFile(id, file) {
+            const dt = new DataTransfer();
+            if (file) dt.items.add(file);
+            $(id).files = dt.files;
+        }
+        async function autoAssign(fileList) {
+            const files = Array.from(fileList || []);
+            if (!files.length) return;
+            SLOT_IDS.forEach(id => putFile(id, null));
+            const free = { cdrom: ['local-cdrom'], floppy: ['local-fda', 'local-fdb'], hdd: ['local-hda', 'local-hdb'] };
+            const log = [];
+            for (const f of files) {
+                const kind = await classify(f);
+                const id = free[kind].shift();
+                const desc = f.name + " (" + fmtBytes(f.size) + ")";
+                if (id) { putFile(id, f); log.push(desc + "  ->  " + SLOT_NAMES[id]); }
+                else log.push(desc + "  ->  skipped (no free " + KIND_NAMES[kind] + " drive)");
+            }
+            $('auto-log').innerText = log.join("\n");
+        }
+        $('auto-files').addEventListener('change', e => autoAssign(e.target.files));
+        window.addEventListener('dragover', e => e.preventDefault());
+        window.addEventListener('drop', e => {
+            e.preventDefault();
+            if (e.dataTransfer && e.dataTransfer.files.length) autoAssign(e.dataTransfer.files);
+        });
+        document.querySelectorAll('.clear').forEach(btn => btn.addEventListener('click', () => { $(btn.dataset.for).value = ''; }));
+
+        // ---- Screen toolbar: fullscreen, mouse capture, Ctrl+Alt+Del ----
+        const fsBtn = $('fs-btn'), mouseBtn = $('mouse-btn'), cadBtn = $('cad-btn'), mouseHint = $('mouse-hint');
+        let guestMouse = false;
+        function setToolbar(on) { fsBtn.disabled = mouseBtn.disabled = cadBtn.disabled = !on; }
+        function updateMouseHint() {
+            const locked = !!document.pointerLockElement;
+            mouseBtn.textContent = locked ? "Release mouse (Esc)" : "Capture mouse";
+            mouseHint.textContent = !emulator ? "" : locked ? "Mouse captured - press Esc to release."
+                : guestMouse ? "The OS is using a mouse - click the screen to capture it."
+                : "The OS has not turned on a mouse yet (BIOS and text-mode setup screens don't use one).";
+        }
+        function captureMouse() {
+            if (emulator && !document.pointerLockElement) emulator.lock_mouse().catch(() => {});
+        }
+        document.addEventListener('pointerlockchange', updateMouseHint);
+        $('screen_container').addEventListener('mousedown', ev => {
+            if (!emulator) return;
+            ev.preventDefault();   // no text selection, and keep focus off the file pickers
+            if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+            if (guestMouse) captureMouse();
+        });
+        mouseBtn.addEventListener('click', () => { document.pointerLockElement ? document.exitPointerLock() : captureMouse(); });
+        cadBtn.addEventListener('click', () => {
+            // Ctrl down, Alt down, Del down/up (extended), Alt up, Ctrl up
+            if (emulator) emulator.keyboard_send_scancodes([0x1D, 0x38, 0xE0, 0x53, 0xE0, 0xD3, 0xB8, 0x9D]);
+        });
+        fsBtn.addEventListener('click', async () => {
+            if (!emulator) return;
+            if (document.fullscreenElement) { document.exitFullscreen(); return; }
+            try { await $('screen_container').requestFullscreen(); } catch (e) { setStatus("Fullscreen failed: " + e.message, true); }
+        });
+        function fitToScreen() {
+            if (!emulator) return;
+            const cont = $('screen_container');
+            const canvas = cont.querySelector('canvas'), text = cont.querySelector('div');
+            try { emulator.screen_set_scale(1, 1); } catch (e) { return; }
+            text.style.transform = ''; text.style.transformOrigin = '';
+            if (!document.fullscreenElement) return;
+            setTimeout(() => {
+                if (!emulator || !document.fullscreenElement) return;
+                const graphical = canvas.offsetWidth > 0 && getComputedStyle(canvas).display !== 'none';
+                const el = graphical ? canvas : text;
+                const w = el.offsetWidth, h = el.offsetHeight;
+                if (!w || !h) return;
+                const k = Math.min(window.innerWidth / w, window.innerHeight / h);
+                if (graphical) {
+                    try { emulator.screen_set_scale(k, k); } catch (e) {}
+                } else {
+                    // v86's own text-mode scaling misplaces the text, so scale it ourselves, centered
+                    text.style.transformOrigin = 'center center';
+                    text.style.transform = 'scale(' + k + ')';
+                }
+            }, 80);
+        }
+        document.addEventListener('fullscreenchange', () => {
+            const on = !!document.fullscreenElement;
+            fsBtn.textContent = on ? "Exit fullscreen" : "Fullscreen";
+            try { if (navigator.keyboard) (on ? navigator.keyboard.lock() : (navigator.keyboard.unlock(), Promise.resolve())).catch(() => {}); } catch (e) {}
+            fitToScreen();
+            if (on && guestMouse) captureMouse();
+        });
+
         function stopEmulator() {
             stopHeartbeat();
             stopStats();
+            setToolbar(false);
+            guestMouse = false;
+            if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+            if (document.pointerLockElement) document.exitPointerLock();
             if (emulator) {
                 try { emulator.destroy(); } catch (e) { console.error(e); }
                 emulator = null;
             }
             stopBtn.disabled = true;
             startBtn.disabled = false;
+            updateMouseHint();
         }
         stopBtn.addEventListener('click', () => { stopEmulator(); setStatus("Stopped."); });
 
         startBtn.addEventListener('click', async () => {
             if (typeof V86 === 'undefined') return;
 
-            const hda = $('local-hda').files[0];
+            const hda = $('local-hda').files[0], hdb = $('local-hdb').files[0];
             const cdrom = $('local-cdrom').files[0];
-            const fda = $('local-fda').files[0];
-            if (!hda && !cdrom && !fda) {
-                setStatus("Pick at least one of: hard disk image, ISO, or floppy image.", true);
+            const fda = $('local-fda').files[0], fdb = $('local-fdb').files[0];
+            const drives = [hda, hdb, cdrom, fda, fdb];
+            if (!drives.some(Boolean)) {
+                setStatus("Pick at least one disk: a CD/DVD, floppy or hard disk image.", true);
                 return;
+            }
+            for (const [f, label] of [[fda, 'Floppy A'], [fdb, 'Floppy B']]) {
+                if (f && !FLOPPY_SIZES.has(f.size)) {
+                    setStatus(label + ": " + f.name + " is " + f.size + " bytes, which is not a standard floppy size. Put it in the CD/DVD or hard disk slot instead.", true);
+                    return;
+                }
             }
 
             stopEmulator();
             startBtn.disabled = true;
-            const names = [hda, cdrom, fda].filter(Boolean).map(f => f.name + " (" + Math.round(f.size / 1048576) + " MB)").join(", ");
+            $('screen_container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const names = drives.filter(Boolean).map(f => f.name + " (" + Math.round(f.size / 1048576) + " MB)").join(", ");
             const t0 = Date.now();
             stopHeartbeat();
             heartbeat = setInterval(() => {
@@ -1107,17 +1269,24 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 };
                 // File objects are streamed by v86 itself, so big ISOs/images don't get copied into one huge buffer.
                 if (hda)   options.hda   = { buffer: hda };
+                if (hdb)   options.hdb   = { buffer: hdb };
                 if (cdrom) options.cdrom = { buffer: cdrom };
                 if (fda)   options.fda   = { buffer: fda };
-                if (cdrom && !hda) options.boot_order = 0x123;   // CD first when there's no hard disk
+                if (fdb)   options.fdb   = { buffer: fdb };
+                const bootOrder = parseInt($('boot-select').value);
+                if (bootOrder) options.boot_order = bootOrder;   // otherwise v86 picks a default from the drives present
 
                 emulator = new V86(options);
                 startStats(emulator);
                 emulator.add_listener('emulator-ready', () => {
                     stopHeartbeat();
-                    setStatus("Running. Click the screen to capture keyboard/mouse.");
+                    setStatus("Running.");
                     stopBtn.disabled = false;
+                    setToolbar(true);
+                    updateMouseHint();
                 });
+                emulator.add_listener('mouse-enable', v => { guestMouse = !!v; updateMouseHint(); });
+                emulator.add_listener('screen-set-size', () => { if (document.fullscreenElement) fitToScreen(); });
                 emulator.add_listener('download-progress', e => {
                     if (e.lengthComputable) setStatus("Loading " + e.file_name + " ... " + Math.round(e.loaded / e.total * 100) + "%");
                 });
