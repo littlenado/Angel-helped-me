@@ -90,6 +90,11 @@
         .filerow input[type="file"] { flex: 1; min-width: 0; }
         .clear { padding: 4px 9px; }
         .blank { max-width: 170px; }
+        .num { width: 90px; flex: none; padding: 6px 8px; box-sizing: border-box; background: #202124; color: #e8eaed; border: 1px solid #5f6368; border-radius: 4px; }
+        input[type="range"] { flex: 1; width: 100%; min-width: 0; }
+        .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        #saved-list .pc { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; font-size: 12px; color: #bdc1c6; }
+        #saved-list .pc span { flex: 1; min-width: 200px; }
         .toolbar { margin-top: 8px; display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; max-width: 850px; }
         .toolbar button:disabled { opacity: .45; cursor: not-allowed; }
         .boot-row select { max-width: 270px; }
@@ -190,17 +195,73 @@
                 <div id="net-help" class="hint"></div>
             </div>
 
-            <!-- HARDWARE TUNING & TRIGGER -->
-            <div class="boot-row">
-                <div>
-                    <label for="os-select" style="display:block; margin-bottom:4px;">Target Operating System Profile RAM Preset:</label>
-                    <select id="os-select">
-                        <option value="64">Windows 95 Configuration (64MB RAM)</option>
-                        <option value="128">Windows NT 4.0 Configuration (128MB RAM)</option>
-                        <option value="256">Windows 2000 Configuration (256MB RAM)</option>
-                        <option value="512" selected>Windows XP Configuration (512MB RAM)</option>
+            <!-- HARDWARE -->
+            <div class="section">
+                <h3>4. Hardware</h3>
+                <div class="row">
+                    <label for="ram-input">Memory (RAM): <span id="ram-label"></span></label>
+                    <div class="filerow">
+                        <input type="range" id="ram-range" min="16" max="2048" step="16" value="512">
+                        <input type="number" id="ram-input" class="num" min="16" max="2048" step="16" value="512"> <span class="hint">MB</span>
+                    </div>
+                    <div class="filerow">
+                        <label for="os-select" class="hint">Presets:</label>
+                        <select id="os-select">
+                            <option value="64">Windows 95 (64 MB)</option>
+                            <option value="128">Windows NT 4.0 (128 MB)</option>
+                            <option value="256">Windows 2000 (256 MB)</option>
+                            <option value="512" selected>Windows XP (512 MB)</option>
+                            <option value="">Custom</option>
+                        </select>
+                    </div>
+                    <div id="ram-warn" class="hint"></div>
+                </div>
+                <div class="row">
+                    <label for="vram-select">Video memory:</label>
+                    <select id="vram-select">
+                        <option value="4">4 MB</option>
+                        <option value="8">8 MB</option>
+                        <option value="16" selected>16 MB</option>
+                        <option value="32">32 MB</option>
+                        <option value="64">64 MB</option>
                     </select>
                 </div>
+                <div class="row">
+                    <label for="cpu-cap">CPU execution cap: <span id="cpu-cap-label">100%</span> <span class="hint">(applies instantly, even while running)</span></label>
+                    <input type="range" id="cpu-cap" min="10" max="100" step="5" value="100">
+                    <label class="hint" style="cursor:pointer"><input type="checkbox" id="jit-box" checked> JIT compiler on (turn off only if a guest crashes; it is much slower)</label>
+                    <div class="hint">CPU cores: 1. v86 emulates a single x86 processor, so there is no core count to change. The cap limits how much of your computer's CPU time the PC may use; it cannot make the PC faster than your computer allows.</div>
+                </div>
+                <div class="hint">RAM, video memory and the JIT switch take effect at the next boot. A resumed PC always uses the RAM and video memory it was saved with.</div>
+            </div>
+
+            <!-- SAVED PC -->
+            <div class="section">
+                <h3>5. Saved PC</h3>
+                <div class="row">
+                    <label style="cursor:pointer"><input type="checkbox" id="remember" checked> Keep this PC between visits</label>
+                    <div class="hint">Stores the machine's memory and everything written to its disks inside this browser, so closing the tab doesn't lose your install.</div>
+                </div>
+                <div class="row">
+                    <label for="machine-name">PC name:</label>
+                    <input type="text" id="machine-name" value="My PC" spellcheck="false" maxlength="40">
+                </div>
+                <div class="row">
+                    <label for="autosave">Autosave while running:</label>
+                    <select id="autosave">
+                        <option value="0">Off</option>
+                        <option value="2">Every 2 minutes</option>
+                        <option value="5" selected>Every 5 minutes</option>
+                        <option value="10">Every 10 minutes</option>
+                        <option value="30">Every 30 minutes</option>
+                    </select>
+                </div>
+                <div id="saved-info" class="hint"></div>
+                <div id="saved-list"></div>
+            </div>
+
+            <!-- BOOT -->
+            <div class="boot-row">
                 <div>
                     <label for="boot-select" style="display:block; margin-bottom:4px;">Boot order:</label>
                     <select id="boot-select">
@@ -210,8 +271,12 @@
                         <option value="786">Hard disk first</option>
                     </select>
                 </div>
-                <div><button id="stop-btn" disabled>Stop</button> <button id="start-btn">Boot Emulator</button></div>
-            </div>
+                <div class="btns">
+                    <button id="save-btn" disabled title="Save the machine state now and keep running">Save state</button>
+                    <button id="suspend-btn" disabled title="Save the machine state, then stop. Resume later exactly where you left off">Save &amp; stop</button>
+                    <button id="stop-btn" disabled title="Like pulling the plug: the disk is kept, the running programs are not">Power off</button>
+                    <button id="start-btn">Boot Emulator</button>
+                </div>
         </div>
     </div>
 
@@ -402,7 +467,9 @@
         // v86 only keeps the sectors the OS actually writes.
         function makeBlankDisk(gb) {
             const zero = new Blob([new ArrayBuffer(1048576)]);
-            return new File(new Array(gb * 1024).fill(zero), "Blank " + gb + " GB hard disk.img");
+            const f = new File(new Array(gb * 1024).fill(zero), "Blank " + gb + " GB hard disk.img");
+            f.blankGB = gb;
+            return f;
         }
         function pickDisk(slot) {          // a chosen file wins over the blank-disk dropdown
             const f = $('local-' + slot).files[0];
@@ -573,6 +640,299 @@
             renderFloppyBar();
         });
 
+        // ================= Hardware settings (RAM, video memory, CPU) =================
+        const ramRange = $('ram-range'), ramInput = $('ram-input'), vramSel = $('vram-select');
+        const capRange = $('cpu-cap'), capLabel = $('cpu-cap-label'), jitBox = $('jit-box');
+        const RAM_MIN = 16, RAM_MAX = 2048;
+        function getRamMB() {
+            const v = parseInt(ramInput.value);
+            return Math.min(RAM_MAX, Math.max(RAM_MIN, isNaN(v) ? 64 : v));
+        }
+        function ramInfo() {
+            const mb = getRamMB(), dm = navigator.deviceMemory;   // approximate GB, Chrome only
+            $('ram-label').textContent = mb + " MB";
+            let msg = '';
+            if (mb > 1536) msg = "Very large: the browser may refuse to allocate this much.";
+            else if (dm && mb > dm * 1024 * 0.4) msg = "This device reports about " + dm + " GB of RAM. Leave plenty free for the browser; disk writes also use memory.";
+            $('ram-warn').textContent = msg;
+        }
+        function syncRamPreset() {
+            const v = String(getRamMB());
+            osSelect.value = [...osSelect.options].some(o => o.value === v) ? v : '';
+        }
+        function setRamMB(v) { ramInput.value = v; ramRange.value = v; syncRamPreset(); ramInfo(); }
+        ramRange.addEventListener('input', () => { ramInput.value = ramRange.value; syncRamPreset(); ramInfo(); });
+        ramInput.addEventListener('input', () => {
+            const v = parseInt(ramInput.value);
+            if (v >= RAM_MIN && v <= RAM_MAX) ramRange.value = v;
+            syncRamPreset(); ramInfo();
+        });
+        ramInput.addEventListener('change', () => setRamMB(getRamMB()));
+        osSelect.addEventListener('change', () => { if (osSelect.value) setRamMB(parseInt(osSelect.value)); });
+        setRamMB(parseInt(osSelect.value) || 512);
+
+        // Execution cap: the engine stretches the idle gap after each busy slice, so the PC gets only this share of CPU time.
+        function capFraction() { const v = parseInt(capRange.value); return v >= 100 ? 0 : v / 100; }
+        function applyCap() {
+            capLabel.textContent = (parseInt(capRange.value) || 100) + "%";
+            if (emulator && emulator.v86) emulator.v86.cpu_cap = capFraction();
+        }
+        capRange.addEventListener('input', applyCap);
+        applyCap();
+
+        // ================= Saved PC: machine state + disk writes in IndexedDB =================
+        // One save = one atomic IndexedDB transaction (changed disk chunks + compressed machine state + record), taken
+        // while the PC is paused. If the tab dies mid-save the previous save is still intact, and a save never mixes
+        // a new disk with an old machine state.
+        const rememberBox = $('remember'), nameInput = $('machine-name'), autosaveSel = $('autosave');
+        const saveBtn = $('save-btn'), suspendBtn = $('suspend-btn');
+        const SLOTS = ['hda', 'hdb'];
+        const CHUNK_BYTES = 16384;
+        let storageOK = false, dbPromise = null, saving = false;
+        let lastSaveAt = 0, bootedAt = 0, machineConfig = null, savedCache = [];
+
+        const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+        const txDone = tx => new Promise((res, rej) => {
+            tx.oncomplete = () => res();
+            tx.onerror = () => rej(tx.error);
+            tx.onabort = () => rej(tx.error || new Error("The save was cancelled."));
+        });
+        function openDB() {
+            if (!dbPromise) dbPromise = new Promise((res, rej) => {
+                if (!window.indexedDB) return rej(new Error("IndexedDB is not available"));
+                let r;
+                try { r = indexedDB.open('v86-workspace', 1); } catch (e) { return rej(e); }
+                r.onupgradeneeded = () => {
+                    const d = r.result;
+                    d.createObjectStore('machines', { keyPath: 'name' });
+                    d.createObjectStore('chunks');
+                    d.createObjectStore('states');
+                };
+                r.onsuccess = () => res(r.result);
+                r.onerror = () => rej(r.error);
+                r.onblocked = () => rej(new Error("Storage is blocked by another tab"));
+            });
+            return dbPromise;
+        }
+        const machineName = () => (nameInput.value.trim() || 'My PC').slice(0, 40);
+        const allOf = name => IDBKeyRange.bound([name], [name, []]);
+        const slotRange = (name, slot) => IDBKeyRange.bound([name, slot, -1], [name, slot, Infinity]);
+
+        async function getMachine(name) { const db = await openDB(); return reqP(db.transaction('machines').objectStore('machines').get(name)); }
+        async function listMachines() { const db = await openDB(); return reqP(db.transaction('machines').objectStore('machines').getAll()); }
+        async function getStateBlob(name) { const db = await openDB(); return reqP(db.transaction('states').objectStore('states').get(name)); }
+        async function deleteMachine(name) {
+            const db = await openDB();
+            const tx = db.transaction(['machines', 'chunks', 'states'], 'readwrite');
+            tx.objectStore('machines').delete(name);
+            tx.objectStore('states').delete(name);
+            tx.objectStore('chunks').delete(allOf(name));
+            await txDone(tx);
+        }
+        async function discardState(name) {
+            const db = await openDB();
+            const tx = db.transaction(['machines', 'states'], 'readwrite');
+            const rec = await reqP(tx.objectStore('machines').get(name));
+            if (rec) { rec.hasState = false; rec.stateBytes = 0; tx.objectStore('machines').put(rec); }
+            tx.objectStore('states').delete(name);
+            await txDone(tx);
+        }
+
+        async function compressBuf(ab) {
+            const raw = new Blob([ab]);
+            if (typeof CompressionStream === 'undefined') return raw;
+            const out = await new Response(raw.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+            return new Blob([out], { type: 'application/gzip' });
+        }
+        async function decompressBlob(b) {
+            if (b.type !== 'application/gzip') return b.arrayBuffer();
+            return new Response(b.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        }
+
+        function diskBuffer(slot) {
+            if (!emulator || !emulator.v86) return null;
+            const ide = emulator.v86.cpu.devices.ide;
+            const drive = slot === 'hda' ? ide.primary.master : ide.primary.slave;
+            return drive && drive.buffer && drive.buffer.cx ? drive.buffer : null;
+        }
+        async function loadOverlay(name, slot, buf, onProgress) {
+            const db = await openDB();
+            let lower = [name, slot, -1], exclusive = false, n = 0;
+            for (;;) {
+                const store = db.transaction('chunks').objectStore('chunks');
+                const batch = await reqP(store.getAll(IDBKeyRange.bound(lower, [name, slot, Infinity], exclusive, false), 2048));
+                for (const r of batch) buf.cx.set(r.i, { d: r.d, m: r.m });
+                n += batch.length;
+                if (onProgress) onProgress(n);
+                if (batch.length < 2048) break;
+                lower = [name, slot, batch[batch.length - 1].i];
+                exclusive = true;
+            }
+            return n;
+        }
+
+        const ago = ms => {
+            const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+            if (s < 10) return "just now";
+            if (s < 90) return s + " s ago";
+            if (s < 5400) return Math.round(s / 60) + " min ago";
+            if (s < 172800) return Math.round(s / 3600) + " h ago";
+            return Math.round(s / 86400) + " days ago";
+        };
+        const descOf = f => f.blankGB ? { blank: f.blankGB } : { name: f.name, size: f.size };
+        const sameDrive = (a, b) => (a.blank || b.blank) ? a.blank === b.blank : (a.name === b.name && a.size === b.size);
+        const descText = d => d.blank ? "a blank " + d.blank + " GB disk" : d.name + " (" + fmtBytes(d.size) + ")";
+
+        function pauseEmulator() {
+            return new Promise(res => {
+                if (!emulator.is_running()) return res();
+                const fn = () => { emulator.remove_listener('emulator-stopped', fn); res(); };
+                emulator.add_listener('emulator-stopped', fn);
+                emulator.stop();
+            });
+        }
+
+        // mode: 'continue' (save, keep running), 'stop' (save machine state, caller stops), 'poweroff' (keep disk only)
+        async function persist(mode) {
+            if (!emulator || saving || !storageOK || !rememberBox.checked || !machineConfig) return false;
+            saving = true;
+            const em = emulator, name = machineName();
+            let ok = false;
+            try {
+                try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+                setStatus(mode === 'poweroff' ? "Saving disk..." : "Pausing to save the machine state...");
+                await pauseEmulator();
+                let stateBlob = null;
+                if (mode !== 'poweroff') {
+                    stateBlob = await compressBuf(await em.save_state());
+                    setStatus("Saving... (" + fmtBytes(stateBlob.size) + " of machine state)");
+                }
+                const db = await openDB();
+                const tx = db.transaction(['machines', 'chunks', 'states'], 'readwrite');
+                const done = txDone(tx);
+                done.catch(() => {});
+                const chunks = tx.objectStore('chunks');
+                let puts = 0, last = null, total = 0;
+                for (const slot of SLOTS) {
+                    const buf = diskBuffer(slot);
+                    if (!buf) continue;
+                    for (const idx of buf.dirty) {
+                        const c = buf.cx.get(idx);
+                        if (!c) continue;
+                        last = chunks.put({ i: idx, d: c.d, m: c.m }, [name, slot, idx]);
+                        if (++puts % 64 === 0) {
+                            await reqP(last);                       // backpressure: keeps memory bounded on big saves
+                            if (puts % 2048 === 0) setStatus("Saving disk changes... " + fmtBytes(puts * CHUNK_BYTES));
+                        }
+                    }
+                }
+                if (stateBlob) tx.objectStore('states').put(stateBlob, name); else tx.objectStore('states').delete(name);
+                for (const slot of SLOTS) total += await reqP(chunks.count(slotRange(name, slot)));
+                tx.objectStore('machines').put({
+                    name, savedAt: Date.now(), hasState: !!stateBlob, stateBytes: stateBlob ? stateBlob.size : 0,
+                    chunks: total, config: Object.assign({}, machineConfig, { cap: parseInt(capRange.value) || 100 })
+                });
+                await done;
+                for (const slot of SLOTS) { const b = diskBuffer(slot); if (b) b.dirty.clear(); }
+                lastSaveAt = Date.now();
+                ok = true;
+            } catch (e) {
+                console.error(e);
+                const full = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''));
+                setStatus("Could not save: " + (full ? "this browser's storage is full. Delete a saved PC below or free up space." : e.message), true);
+            } finally {
+                saving = false;
+            }
+            if (emulator === em && (mode === 'continue' || !ok)) em.run();
+            if (ok && mode === 'continue') setStatus("Saved at " + new Date().toLocaleTimeString() + ". Running.");
+            refreshSaved();
+            return ok;
+        }
+
+        function updateSaveButtons() {
+            const can = !!(emulator && storageOK && rememberBox.checked && machineConfig);
+            saveBtn.disabled = suspendBtn.disabled = !can;
+        }
+        rememberBox.addEventListener('change', () => { updateSaveButtons(); refreshStartLabel(); });
+
+        // ---- Saved PC list and start-button label ----
+        function refreshStartLabel() {
+            const rec = savedCache.find(r => r.name === machineName());
+            const remembered = storageOK && rememberBox.checked;
+            startBtn.textContent = remembered && rec && rec.hasState ? "Resume saved PC" : "Boot Emulator";
+            const info = $('saved-info');
+            if (!storageOK) return;
+            if (!remembered) { info.textContent = "Saving is off: closing the page loses the PC."; return; }
+            info.textContent = rec
+                ? (rec.hasState ? "\"" + rec.name + "\" is paused with its machine state saved " + ago(rec.savedAt) + ". Boot will resume it."
+                                : "\"" + rec.name + "\" has its disk saved (" + ago(rec.savedAt) + ") but no machine state. Boot will start it from that disk.")
+                : "No saved PC with this name yet. It is created the first time you save.";
+        }
+        async function refreshSaved() {
+            const list = $('saved-list');
+            if (!storageOK) return;
+            try { savedCache = (await listMachines()).sort((a, b) => b.savedAt - a.savedAt); } catch (e) { savedCache = []; }
+            list.textContent = '';
+            for (const r of savedCache) {
+                const row = document.createElement('div');
+                row.className = 'pc';
+                const info = document.createElement('span');
+                info.textContent = r.name + ": " + (r.hasState ? "machine state + disk" : "disk only") + ", " + fmtBytes((r.chunks || 0) * CHUNK_BYTES + (r.stateBytes || 0)) + ", " + ago(r.savedAt);
+                row.appendChild(info);
+                const mk = (label, fn, title) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'clear'; b.textContent = label; b.title = title; b.addEventListener('click', fn); row.appendChild(b); };
+                mk("Use", () => { nameInput.value = r.name; refreshStartLabel(); }, "Select this PC");
+                if (r.hasState) mk("Discard state", async () => {
+                    if (!confirm("Discard the saved machine state of \"" + r.name + "\"? Its disk is kept, but programs that were running are lost.")) return;
+                    await discardState(r.name); refreshSaved();
+                }, "Forget the running state, keep the disk");
+                mk("Delete", async () => {
+                    if (emulator && machineName() === r.name && !confirm("\"" + r.name + "\" is running right now. Delete its saved data anyway?")) return;
+                    if (!confirm("Delete \"" + r.name + "\" and everything saved for it, including its disk contents?")) return;
+                    await deleteMachine(r.name); refreshSaved();
+                }, "Delete this PC and its disk");
+                list.appendChild(row);
+            }
+            refreshStartLabel();
+            try {
+                if (navigator.storage && navigator.storage.estimate) {
+                    const e = await navigator.storage.estimate();
+                    if (e.quota) $('saved-info').textContent += "  Browser storage: " + fmtBytes(e.usage || 0) + " used of about " + fmtBytes(e.quota) + ".";
+                }
+            } catch (e) {}
+        }
+        nameInput.addEventListener('input', refreshStartLabel);
+        autosaveSel.addEventListener('change', () => { try { localStorage.setItem('v86-autosave', autosaveSel.value); } catch (e) {} });
+        try { const a = localStorage.getItem('v86-autosave'); if (a !== null && [...autosaveSel.options].some(o => o.value === a)) autosaveSel.value = a; } catch (e) {}
+
+        (async () => {
+            try {
+                await openDB();
+                storageOK = true;
+            } catch (e) {
+                console.warn(e);
+                rememberBox.checked = false;
+                rememberBox.disabled = true;
+                $('saved-info').textContent = "Saving isn't available: this browser is blocking storage for this page (" + e.message + "). A private window or some school policies do that. Open it in a normal Chrome window, or host the page on https (for example GitHub Pages).";
+                return;
+            }
+            await refreshSaved();
+        })();
+
+        // Autosave, save when the tab is hidden, and warn before closing with unsaved progress.
+        setInterval(() => {
+            const mins = parseInt(autosaveSel.value);
+            if (!mins || !emulator || saving || !storageOK || !rememberBox.checked) return;
+            if (Date.now() - Math.max(lastSaveAt, bootedAt) >= mins * 60000) persist('continue');
+        }, 15000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'hidden' || !emulator || saving || !storageOK || !rememberBox.checked || !parseInt(autosaveSel.value)) return;
+            if (Date.now() - Math.max(lastSaveAt, bootedAt) > 60000) persist('continue');
+        });
+        window.addEventListener('beforeunload', e => {
+            if (emulator && Date.now() - Math.max(lastSaveAt, bootedAt) > 20000) { e.preventDefault(); e.returnValue = ''; }
+        });
+
+        // ================= Start / stop =================
         function stopEmulator() {
             stopHeartbeat();
             stopStats();
@@ -585,30 +945,75 @@
                 try { emulator.destroy(); } catch (e) { console.error(e); }
                 emulator = null;
             }
+            machineConfig = null;
             stopBtn.disabled = true;
             startBtn.disabled = false;
+            updateSaveButtons();
             updateMouseHint();
         }
-        stopBtn.addEventListener('click', () => { stopEmulator(); setStatus("Stopped."); });
+        saveBtn.addEventListener('click', () => persist('continue'));
+        suspendBtn.addEventListener('click', async () => {
+            if (await persist('stop')) {
+                stopEmulator();
+                setStatus("Saved. Press \"" + startBtn.textContent + "\" to continue exactly where you left off.");
+                refreshSaved();
+            }
+        });
+        stopBtn.addEventListener('click', async () => {
+            const kept = storageOK && rememberBox.checked && machineConfig;
+            if (kept && !(await persist('poweroff')) && !confirm("Saving the disk failed. Power off anyway and lose the changes since the last save?")) return;
+            stopEmulator();
+            setStatus(kept ? "Powered off. The disk is kept; the next boot starts from it." : "Stopped.");
+            refreshSaved();
+        });
 
-        startBtn.addEventListener('click', async () => {
+        startBtn.addEventListener('click', bootMachine);
+        async function bootMachine() {
             if (typeof V86 === 'undefined') return;
+            const fail = msg => { setStatus(msg, true); startBtn.disabled = false; };
 
-            const hda = pickDisk('hda'), hdb = pickDisk('hdb');
-            const cdrom = $('local-cdrom').files[0];
+            let hda = pickDisk('hda'), hdb = pickDisk('hdb');
+            let cdrom = $('local-cdrom').files[0];
             floppyDisks = naturalSort(Array.from($('local-fda').files));
             floppyIdx = 0;
             const fda = floppyDisks[0], fdb = $('local-fdb').files[0];
-            const drives = [hda, hdb, cdrom, fda, fdb];
-            if (!drives.some(Boolean)) {
-                setStatus("Pick at least one disk: a CD/DVD, floppy or hard disk image.", true);
-                return;
-            }
-            for (const f of floppyDisks.concat(fdb ? [fdb] : [])) {
-                if (f.size > FLOPPY_MAX) {
-                    setStatus(f.name + " is " + fmtBytes(f.size) + ", too big to be a floppy image. Put it in the CD/DVD or hard disk slot instead.", true);
-                    return;
+
+            const remember = storageOK && rememberBox.checked;
+            const name = machineName();
+            let rec = null;
+            if (remember) { try { rec = await getMachine(name); } catch (e) { console.error(e); } }
+            const resume = !!(rec && rec.hasState);
+
+            // A saved PC owns its hard disks: the drives picked now must be the ones it was saved with.
+            if (rec) {
+                const picked = { hda, hdb, cdrom };
+                for (const slot of ['hda', 'hdb', 'cdrom']) {
+                    const sd = rec.config.drives[slot], f = picked[slot];
+                    const where = slot === 'cdrom' ? 'the CD/DVD drive' : (slot === 'hda' ? 'Hard disk A' : 'Hard disk B');
+                    if (slot === 'cdrom' && !resume) continue;          // a different CD is fine when only the disk is kept
+                    if (sd && !f) {
+                        if (sd.blank) picked[slot] = makeBlankDisk(sd.blank);
+                        else return fail("The saved PC \"" + name + "\" used " + descText(sd) + " in " + where + ". Pick that same file there to continue (or delete the saved PC to start over).");
+                    } else if (sd && f && !sameDrive(descOf(f), sd)) {
+                        return fail("The saved PC \"" + name + "\" used " + descText(sd) + " in " + where + ", but you picked " + descText(descOf(f)) + ". Pick the original, use another PC name, or delete the saved PC to start over.");
+                    } else if (!sd && f && resume) {
+                        return fail("The saved PC \"" + name + "\" had nothing in " + where + ". Clear it to resume, or use another PC name.");
+                    }
                 }
+                ({ hda, hdb, cdrom } = picked);
+            }
+
+            const drives = [hda, hdb, cdrom, fda, fdb];
+            if (!drives.some(Boolean)) return fail("Pick at least one disk: a CD/DVD, floppy or hard disk image.");
+            for (const f of floppyDisks.concat(fdb ? [fdb] : [])) {
+                if (f.size > FLOPPY_MAX) return fail(f.name + " is " + fmtBytes(f.size) + ", too big to be a floppy image. Put it in the CD/DVD or hard disk slot instead.");
+            }
+
+            // A resumed PC must come back with the hardware it was saved with.
+            if (resume) {
+                setRamMB(rec.config.ram);
+                vramSel.value = String(rec.config.vram);
+                if (rec.config.bios && [...$('bios-default').options].some(o => o.value === rec.config.bios)) $('bios-default').value = rec.config.bios;
             }
 
             stopEmulator();
@@ -619,11 +1024,11 @@
             stopHeartbeat();
             heartbeat = setInterval(() => {
                 const sec = Math.round((Date.now() - t0) / 1000);
-                setStatus("Starting... " + sec + "s  [" + names + "]" + (sec > 30
-                    ? "  Still waiting. Try closing other tabs, or a smaller RAM preset."
+                setStatus((resume ? "Resuming... " : "Starting... ") + sec + "s  [" + names + "]" + (sec > 30
+                    ? "  Still waiting. Try closing other tabs, or use less RAM."
                     : ""));
             }, 1000);
-            setStatus("Starting... [" + names + "]");
+            setStatus((resume ? "Resuming... [" : "Starting... [") + names + "]");
 
             try {
                 const [wasmBytes, biosBytes, vgaBytes] = await Promise.all([
@@ -632,7 +1037,7 @@
                     loadBinary('local-vga', 'vgabios.bin', 'vgabios.bin'),
                 ]);
 
-                const ramMB = parseInt(osSelect.value);
+                const ramMB = getRamMB(), vramMB = parseInt(vramSel.value) || 16;
                 const options = {
                     // v86 expects the module's *exports*, not the Instance object.
                     wasm_fn: async (imports) => {
@@ -643,14 +1048,15 @@
                     vga_bios: { buffer: vgaBytes },
                     screen_container: $('screen_container'),
                     memory_size: ramMB * 1024 * 1024,
-                    vga_memory_size: (ramMB >= 512 ? 16 : 8) * 1024 * 1024,
+                    vga_memory_size: vramMB * 1024 * 1024,
+                    disable_jit: jitBox.checked ? 0 : 1,
                     acpi: false,
-                    autostart: true,
+                    autostart: false,        // we start it ourselves, after any saved disk data and state are in place
                 };
-                // File objects are streamed by v86 itself, so big ISOs/images don't get copied into one huge buffer.
-                if (hda)   options.hda   = { buffer: hda };
-                if (hdb)   options.hdb   = { buffer: hdb };
-                if (cdrom) options.cdrom = { buffer: cdrom };
+                // async: true keeps big images out of memory and keeps disk contents out of the saved machine state.
+                if (hda)   options.hda   = { buffer: hda, async: true };
+                if (hdb)   options.hdb   = { buffer: hdb, async: true };
+                if (cdrom) options.cdrom = { buffer: cdrom, async: true };
                 if (fda)   options.fda   = { buffer: fda };
                 if (fdb)   options.fdb   = { buffer: fdb };
                 const bootOrder = parseInt($('boot-select').value);
@@ -659,28 +1065,60 @@
                 const net = buildNetDevice();
                 if (net) options.net_device = net;
                 emulator = new V86(options);
+                const loaded = new Promise(res => emulator.add_listener('emulator-loaded', res));
                 startStats(emulator);
                 io.net = !!net;
-                emulator.add_listener('emulator-ready', () => {
-                    stopHeartbeat();
-                    setStatus("Running.");
-                    stopBtn.disabled = false;
-                    setToolbar(true);
-                    updateMouseHint();
-                    renderFloppyBar();
-                });
                 emulator.add_listener('mouse-enable', v => { guestMouse = !!v; updateMouseHint(); });
                 emulator.add_listener('screen-set-size', () => { if (document.fullscreenElement) fitToScreen(); });
                 emulator.add_listener('download-progress', e => {
                     if (e.lengthComputable) setStatus("Loading " + e.file_name + " ... " + Math.round(e.loaded / e.total * 100) + "%");
                 });
+                await loaded;
+                emulator.v86.cpu_cap = capFraction();
+
+                machineConfig = {
+                    ram: ramMB, vram: vramMB, jit: !!jitBox.checked, bios: $('bios-default').value,
+                    net: { mode: netModeEl.value },
+                    drives: { hda: hda ? descOf(hda) : null, hdb: hdb ? descOf(hdb) : null, cdrom: cdrom ? descOf(cdrom) : null }
+                };
+
+                if (rec) {
+                    stopHeartbeat();
+                    for (const slot of SLOTS) {
+                        const buf = diskBuffer(slot);
+                        if (!buf || !rec.config.drives[slot]) continue;
+                        const label = slot === 'hda' ? "Hard disk A" : "Hard disk B";
+                        setStatus("Loading saved " + label + "...");
+                        await loadOverlay(name, slot, buf, n => setStatus("Loading saved " + label + "... " + fmtBytes(n * CHUNK_BYTES)));
+                    }
+                    if (resume) {
+                        setStatus("Restoring machine state...");
+                        const blob = await getStateBlob(name);
+                        if (!blob) throw new Error("The saved machine state is missing. Discard it in the Saved PC list and boot from the disk.");
+                        try { await emulator.restore_state(await decompressBlob(blob)); }
+                        catch (e) { throw new Error("Could not restore the saved state (" + e.message + "). Discard it in the Saved PC list to boot from the disk instead."); }
+                    }
+                }
+
+                emulator.run();
+                stopHeartbeat();
+                bootedAt = Date.now();
+                lastSaveAt = 0;
+                const ps2 = emulator.v86.cpu.devices.ps2;
+                guestMouse = !!(ps2 && ps2.enable_mouse_stream);
+                setStatus(resume ? "Resumed the saved PC. Running." : "Running.");
+                stopBtn.disabled = false;
+                setToolbar(true);
+                updateSaveButtons();
+                updateMouseHint();
+                renderFloppyBar();
             } catch (err) {
                 console.error(err);
                 stopHeartbeat();
-                setStatus("Boot failed: " + err.message, true);
                 stopEmulator();
+                setStatus("Boot failed: " + err.message, true);
             }
-        });
+        }
     </script>
 </body>
 </html>
