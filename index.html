@@ -298,6 +298,15 @@
         <label class="hint" style="cursor:pointer">+ Add disks <input type="file" id="fd-add" multiple hidden></label>
         <span id="fd-msg" class="hint"></span>
     </div>
+    <div id="xfer-bar" class="toolbar" hidden>
+        <strong>Send files to the PC:</strong>
+        <button id="xfer-files-btn" title="Pick files on this computer">Files...</button>
+        <button id="xfer-dir-btn" title="Pick a whole folder on this computer">Folder...</button>
+        <button id="xfer-back" hidden title="Put the CD that was in the drive back">Put the CD back</button>
+        <input type="file" id="xfer-files" multiple hidden>
+        <input type="file" id="xfer-dir" webkitdirectory hidden>
+        <span id="xfer-msg" class="hint">You can also drag files or folders onto the screen.</span>
+    </div>
     <div id="stats" class="stats"></div>
     <div id="status-text" class="status error">The page script has not started. If this message stays, your browser blocked or failed to run it (try reloading, or open it in a normal Chrome tab).</div>
 
@@ -932,6 +941,249 @@
             if (emulator && Date.now() - Math.max(lastSaveAt, bootedAt) > 20000) { e.preventDefault(); e.returnValue = ''; }
         });
 
+        // ================= Send files to the PC =================
+        // Builds an ISO 9660 disc image (with Joliet long names) from files picked on this computer, entirely in the
+        // browser. File contents are referenced, not copied, so big files don't use memory. The disc is put into the
+        // PC's CD/DVD drive; the guest OS then copies from it onto its own hard disk.
+        const ISO_SS = 2048;
+        function buildIso(entries, volLabel) {
+            const mkNode = (name, isDir) => ({ name, isDir, kids: new Map(), file: null, size: 0, mtime: Date.now(), p: '', j: '' });
+            const root = mkNode('', true);
+            for (const e of entries) {
+                const parts = e.path.split('/').filter(Boolean);
+                let d = root;
+                for (let i = 0; i < parts.length - 1; i++) {
+                    if (!d.kids.has(parts[i])) d.kids.set(parts[i], mkNode(parts[i], true));
+                    d = d.kids.get(parts[i]);
+                }
+                const n = mkNode(parts[parts.length - 1], false);
+                n.file = e.file; n.size = e.file.size; n.mtime = e.file.lastModified || Date.now();
+                d.kids.set(n.name + '\u0000' + d.kids.size, n);
+            }
+            // ---- names ----
+            const clean8 = s => s.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+            const jolClean = s => s.replace(/[\u0000-\u001f*\/:;?\\]/g, '_');
+            (function names(d) {
+                const usedP = new Set(), usedJ = new Set();
+                for (const k of d.kids.values()) {
+                    let base, ext = '';
+                    const dot = k.isDir ? -1 : k.name.lastIndexOf('.');
+                    if (dot > 0) { base = k.name.slice(0, dot); ext = k.name.slice(dot + 1); } else base = k.name;
+                    base = clean8(base) || '_'; ext = clean8(ext).slice(0, 3);
+                    let b = base.slice(0, 8), n = 1;
+                    while (usedP.has(b + '.' + ext)) { const t = '~' + (n++); b = base.slice(0, 8 - t.length) + t; }
+                    usedP.add(b + '.' + ext);
+                    k.p = k.isDir ? b : b + '.' + ext + ';1';
+                    let jn = jolClean(k.name) || '_';
+                    if (jn.length > 64) { const dj = k.isDir ? -1 : jn.lastIndexOf('.'); jn = dj > 0 && jn.length - dj <= 10 ? jn.slice(0, 64 - (jn.length - dj)) + jn.slice(dj) : jn.slice(0, 64); }
+                    let c = jn, m = 2;
+                    while (usedJ.has(c.toLowerCase())) { const dj = k.isDir ? -1 : jn.lastIndexOf('.'); c = dj > 0 ? jn.slice(0, dj) + ' (' + m + ')' + jn.slice(dj) : jn + ' (' + m + ')'; m++; }
+                    usedJ.add(c.toLowerCase()); k.j = c;
+                }
+                for (const k of d.kids.values()) if (k.isDir) names(k);
+            })(root);
+
+            // ---- byte helpers ----
+            const u16le = (v, b, o) => { b[o] = v & 255; b[o + 1] = v >> 8 & 255; };
+            const u16be = (v, b, o) => { b[o] = v >> 8 & 255; b[o + 1] = v & 255; };
+            const u32le = (v, b, o) => { b[o] = v & 255; b[o + 1] = v >>> 8 & 255; b[o + 2] = v >>> 16 & 255; b[o + 3] = v >>> 24 & 255; };
+            const u32be = (v, b, o) => { b[o] = v >>> 24 & 255; b[o + 1] = v >>> 16 & 255; b[o + 2] = v >>> 8 & 255; b[o + 3] = v & 255; };
+            const both16 = (v, b, o) => { u16le(v, b, o); u16be(v, b, o + 2); };
+            const both32 = (v, b, o) => { u32le(v, b, o); u32be(v, b, o + 4); };
+            const nameBytes = (s, jol) => {
+                if (!jol) return Uint8Array.from(s, c => c.charCodeAt(0) & 127);
+                const b = new Uint8Array(s.length * 2); for (let i = 0; i < s.length; i++) u16be(s.charCodeAt(i), b, i * 2); return b;
+            };
+            const dirDate = ms => {
+                const d = new Date(ms), b = new Uint8Array(7);
+                b[0] = Math.min(255, Math.max(0, d.getUTCFullYear() - 1900)); b[1] = d.getUTCMonth() + 1; b[2] = d.getUTCDate();
+                b[3] = d.getUTCHours(); b[4] = d.getUTCMinutes(); b[5] = d.getUTCSeconds(); return b;
+            };
+            const pad2 = (n, w) => String(n).padStart(w, '0');
+            const volDate = ms => {
+                const d = new Date(ms);
+                return pad2(d.getUTCFullYear(), 4) + pad2(d.getUTCMonth() + 1, 2) + pad2(d.getUTCDate(), 2) + pad2(d.getUTCHours(), 2) + pad2(d.getUTCMinutes(), 2) + pad2(d.getUTCSeconds(), 2) + '00';
+            };
+            const sec = n => Math.ceil(n / ISO_SS);
+
+            // ---- per-tree layout (tree 0 = plain ISO 9660, tree 1 = Joliet) ----
+            const trees = [0, 1].map(t => {
+                const jol = t === 1, key = k => jol ? k.j : k.p;
+                const cmp = (a, b) => { const x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; };
+                const dirs = [], q = [root]; root.idx = [0, 0]; root.parentIdx = [1, 1];
+                for (let qi = 0; qi < q.length; qi++) {
+                    const d = q[qi];
+                    d.idx = d.idx || [0, 0]; d.idx[t] = qi + 1;
+                    d.sorted = d.sorted || [[], []]; d.sorted[t] = [...d.kids.values()].sort(cmp);
+                    dirs.push(d);
+                    for (const k of d.sorted[t]) if (k.isDir) { k.parentIdx = k.parentIdx || [0, 0]; k.parentIdx[t] = qi + 1; q.push(k); }
+                }
+                const recLen = k => { const n = nameBytes(key(k), jol).length; return 33 + n + (n % 2 === 0 ? 1 : 0); };
+                for (const d of dirs) {
+                    d.size = d.size || [0, 0]; d.lba = d.lba || [0, 0];
+                    let cur = 68; // '.' and '..'
+                    for (const k of d.sorted[t]) {
+                        const l = recLen(k);
+                        if ((cur % ISO_SS) + l > ISO_SS) cur = sec(cur) * ISO_SS;
+                        cur += l;
+                    }
+                    d.size[t] = sec(cur) * ISO_SS;
+                }
+                let ptSize = 0;
+                for (const d of dirs) { const n = d === root ? 1 : nameBytes(key(d), jol).length; ptSize += 8 + n + (n % 2); }
+                return { dirs, jol, key, recLen, ptSize };
+            });
+
+            // ---- allocate sectors ----
+            let lba = 19;
+            for (const T of trees) { T.lpt = lba; lba += sec(T.ptSize); T.mpt = lba; lba += sec(T.ptSize); }
+            for (const T of trees) { const t = T.jol ? 1 : 0; for (const d of T.dirs) { d.lba[t] = lba; lba += d.size[t] / ISO_SS; } }
+            const metaEnd = lba;
+            const files = [];
+            (function walk(d) { for (const k of d.sorted[0]) { if (k.isDir) walk(k); else files.push(k); } })(root);
+            for (const f of files) { f.lba = lba; lba += sec(f.size); }
+            const total = lba;
+            if (total * ISO_SS >= 4294967296) throw new Error("These files are bigger than 4 GB in total, which a disc image can't hold. Send fewer files at a time.");
+
+            // ---- metadata area ----
+            const meta = new Uint8Array(metaEnd * ISO_SS);
+            const put = (b, o, arr) => b.set(arr, o);
+            const ascii = (b, o, s, n, jol) => {
+                if (jol) { for (let i = 0; i < n / 2; i++) u16be(i < s.length ? s.charCodeAt(i) : 32, b, o + i * 2); }
+                else for (let i = 0; i < n; i++) b[o + i] = i < s.length ? s.charCodeAt(i) & 127 : 32;
+            };
+            const dirRec = (d, t, isSelf, nodeOrNull) => {
+                // d: directory node whose record we write; used for root, '.', '..'
+                const b = new Uint8Array(34);
+                b[0] = 34; both32(d.lba[t], b, 2); both32(d.size[t], b, 10); put(b, 18, dirDate(d.mtime)); b[25] = 2; both16(1, b, 28); b[32] = 1; b[33] = isSelf ? 0 : 1;
+                return b;
+            };
+            const volLbl = (volLabel || 'TRANSFER').toUpperCase().replace(/[^A-Z0-9_]/g, '_').slice(0, 16);
+            const now = Date.now();
+            [0, 1].forEach(t => {
+                const T = trees[t], b = meta.subarray((16 + t) * ISO_SS, (17 + t) * ISO_SS), jol = T.jol;
+                b[0] = jol ? 2 : 1; put(b, 1, nameBytes('CD001')); b[6] = 1;
+                ascii(b, 8, '', 32, jol); ascii(b, 40, volLbl, 32, jol);
+                both32(total, b, 80);
+                if (jol) { b[88] = 0x25; b[89] = 0x2F; b[90] = 0x45; }
+                both16(1, b, 120); both16(1, b, 124); both16(ISO_SS, b, 128); both32(T.ptSize, b, 132);
+                u32le(T.lpt, b, 140); u32be(T.mpt, b, 148);
+                put(b, 156, dirRec(root, t, true));
+                for (const o of [190, 318, 446, 574]) ascii(b, o, '', 128, jol);
+                for (const o of [702, 739, 776]) ascii(b, o, '', 37, jol);
+                const vd = volDate(now);
+                for (const o of [813, 830, 864]) { put(b, o, nameBytes(vd)); b[o + 16] = 0; }
+                put(b, 847, nameBytes('0000000000000000')); b[863] = 0;
+                b[881] = 1;
+            });
+            { const b = meta.subarray(18 * ISO_SS, 19 * ISO_SS); b[0] = 255; put(b, 1, nameBytes('CD001')); b[6] = 1; }
+            // path tables
+            for (const T of trees) {
+                const t = T.jol ? 1 : 0;
+                for (const big of [false, true]) {
+                    const b = meta.subarray((big ? T.mpt : T.lpt) * ISO_SS), w32 = big ? u32be : u32le, w16 = big ? u16be : u16le;
+                    let o = 0;
+                    for (const d of T.dirs) {
+                        const nm = d === root ? Uint8Array.of(0) : nameBytes(T.key(d), T.jol);
+                        b[o] = nm.length; w32(d.lba[t], b, o + 2); w16(d === root ? 1 : d.parentIdx[t], b, o + 6); put(b, o + 8, nm);
+                        o += 8 + nm.length + (nm.length % 2);
+                    }
+                }
+            }
+            // directories
+            for (const T of trees) {
+                const t = T.jol ? 1 : 0;
+                for (const d of T.dirs) {
+                    const base = d.lba[t] * ISO_SS; let o = 0;
+                    const parent = d === root ? root : d.parentNode;
+                    const self = dirRec(d, t, true), up = dirRec(parent, t, false);
+                    put(meta, base, self); put(meta, base + 34, up); o = 68;
+                    for (const k of d.sorted[t]) {
+                        if (k.isDir) k.parentNode = d;
+                        const nm = nameBytes(T.key(k), T.jol), l = 33 + nm.length + (nm.length % 2 === 0 ? 1 : 0);
+                        if ((o % ISO_SS) + l > ISO_SS) o = sec(o) * ISO_SS;
+                        const b = meta.subarray(base + o, base + o + l);
+                        b[0] = l; both32(k.isDir ? k.lba[t] : k.lba, b, 2); both32(k.isDir ? k.size[t] : k.size, b, 10);
+                        put(b, 18, dirDate(k.mtime)); b[25] = k.isDir ? 2 : 0; both16(1, b, 28); b[32] = nm.length; put(b, 33, nm);
+                        o += l;
+                    }
+                }
+            }
+            const parts = [meta];
+            for (const f of files) {
+                parts.push(f.file);
+                const padN = sec(f.size) * ISO_SS - f.size;
+                if (padN) parts.push(new Uint8Array(padN));
+            }
+            return { file: new File(parts, 'files.iso', { type: 'application/octet-stream' }), count: files.length, bytes: files.reduce((s, f) => s + f.size, 0) };
+        }
+
+        const xferBar = $('xfer-bar'), xferMsg = $('xfer-msg'), xferBack = $('xfer-back');
+        let baseCd = null, xferBusy = false;
+        async function sendFiles(entries) {
+            if (!emulator || xferBusy) return;
+            if (!entries.length) return;
+            if (!baseCd) {
+                xferMsg.textContent = "This saved PC was created without a virtual CD drive, so it can't receive files. Power off (the disk is kept) and boot it again to add one.";
+                return;
+            }
+            if (!baseCd.placeholder && !xferBack.dataset.on && !confirm("This swaps the CD currently in the drive (" + baseCd.name + ") for your files until you press \"Put the CD back\". Continue?")) return;
+            xferBusy = true;
+            try {
+                xferMsg.textContent = "Preparing " + entries.length + " file(s)...";
+                const r = buildIso(entries, 'TRANSFER');
+                await emulator.set_cdrom({ buffer: r.file, async: true });
+                machineConfig.xfer = true;
+                xferBack.dataset.on = '1';
+                xferBack.hidden = false;
+                xferBack.textContent = baseCd.placeholder ? "Remove the disc" : "Put the CD back";
+                xferMsg.textContent = r.count + " file(s), " + fmtBytes(r.bytes) + " are in the PC's CD/DVD drive. In the PC open My Computer, open the CD drive (press F5 if it looks empty) and copy them to the hard disk.";
+            } catch (e) {
+                console.error(e);
+                xferMsg.textContent = "Could not send files: " + e.message;
+            } finally { xferBusy = false; }
+        }
+        $('xfer-files-btn').addEventListener('click', () => $('xfer-files').click());
+        $('xfer-dir-btn').addEventListener('click', () => $('xfer-dir').click());
+        $('xfer-files').addEventListener('change', e => { const l = Array.from(e.target.files); e.target.value = ''; sendFiles(l.map(f => ({ path: f.name, file: f }))); });
+        $('xfer-dir').addEventListener('change', e => {
+            const l = Array.from(e.target.files); e.target.value = '';
+            sendFiles(l.map(f => ({ path: f.webkitRelativePath || f.name, file: f })));
+        });
+        xferBack.addEventListener('click', async () => {
+            if (!emulator || !baseCd) return;
+            await emulator.set_cdrom({ buffer: baseCd, async: true });
+            machineConfig.xfer = false;
+            delete xferBack.dataset.on;
+            xferBack.hidden = true;
+            xferMsg.textContent = baseCd.placeholder ? "Disc removed." : "The original CD is back in the drive.";
+        });
+        // Drag files or folders onto the screen
+        async function readDropped(items) {
+            const out = [];
+            const walk = async (en, base) => {
+                if (en.isFile) { const f = await new Promise((res, rej) => en.file(res, rej)); out.push({ path: base + f.name, file: f }); }
+                else if (en.isDirectory) {
+                    const rd = en.createReader();
+                    for (;;) {
+                        const batch = await new Promise((res, rej) => rd.readEntries(res, rej));
+                        if (!batch.length) break;
+                        for (const c of batch) await walk(c, base + en.name + '/');
+                    }
+                }
+            };
+            for (const en of items) await walk(en, '');
+            return out;
+        }
+        const scr = $('screen_container');
+        scr.addEventListener('dragover', e => { if (emulator) e.preventDefault(); });
+        scr.addEventListener('drop', async e => {
+            if (!emulator) return;
+            e.preventDefault();
+            const ens = Array.from(e.dataTransfer.items || []).map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+            sendFiles(ens.length ? await readDropped(ens) : Array.from(e.dataTransfer.files).map(f => ({ path: f.name, file: f })));
+        });
+
         // ================= Start / stop =================
         function stopEmulator() {
             stopHeartbeat();
@@ -939,6 +1191,7 @@
             setToolbar(false);
             guestMouse = false;
             fdBar.hidden = true;
+            xferBar.hidden = true; xferBack.hidden = true; delete xferBack.dataset.on; baseCd = null;
             if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
             if (document.pointerLockElement) document.exitPointerLock();
             if (emulator) {
@@ -991,6 +1244,7 @@
                     const sd = rec.config.drives[slot], f = picked[slot];
                     const where = slot === 'cdrom' ? 'the CD/DVD drive' : (slot === 'hda' ? 'Hard disk A' : 'Hard disk B');
                     if (slot === 'cdrom' && !resume) continue;          // a different CD is fine when only the disk is kept
+                    if (slot === 'cdrom' && sd && sd.placeholder) continue;   // the file-transfer drive: any CD (or none) is fine
                     if (sd && !f) {
                         if (sd.blank) picked[slot] = makeBlankDisk(sd.blank);
                         else return fail("The saved PC \"" + name + "\" used " + descText(sd) + " in " + where + ". Pick that same file there to continue (or delete the saved PC to start over).");
@@ -1016,10 +1270,15 @@
                 if (rec.config.bios && [...$('bios-default').options].some(o => o.value === rec.config.bios)) $('bios-default').value = rec.config.bios;
             }
 
+            // A CD/DVD drive is always present so files can be sent into the PC. (A PC saved without one can't get it later.)
+            const wantDrive = !cdrom && (!resume || !!(rec.config.drives.cdrom && rec.config.drives.cdrom.placeholder));
+            if (wantDrive) { cdrom = buildIso([], 'TRANSFER').file; cdrom.placeholder = true; }
+            if (cdrom && cdrom.placeholder) $('boot-select').dataset.auto = fda ? '801' : hda ? '786' : '';
+
             stopEmulator();
             startBtn.disabled = true;
             $('screen_container').scrollIntoView({ behavior: 'smooth', block: 'start' });
-            const names = drives.filter(Boolean).map(f => f.name + " (" + Math.round(f.size / 1048576) + " MB)").join(", ");
+            const names = drives.filter(f => f && !f.placeholder).map(f => f.name + " (" + Math.round(f.size / 1048576) + " MB)").join(", ");
             const t0 = Date.now();
             stopHeartbeat();
             heartbeat = setInterval(() => {
@@ -1059,7 +1318,8 @@
                 if (cdrom) options.cdrom = { buffer: cdrom, async: true };
                 if (fda)   options.fda   = { buffer: fda };
                 if (fdb)   options.fdb   = { buffer: fdb };
-                const bootOrder = parseInt($('boot-select').value);
+                // With the always-present transfer drive, "Auto" must not try that empty disc first.
+                const bootOrder = parseInt($('boot-select').value) || (cdrom && cdrom.placeholder ? parseInt($('boot-select').dataset.auto) : 0);
                 if (bootOrder) options.boot_order = bootOrder;   // otherwise v86 picks a default from the drives present
 
                 const net = buildNetDevice();
@@ -1079,7 +1339,7 @@
                 machineConfig = {
                     ram: ramMB, vram: vramMB, jit: !!jitBox.checked, bios: $('bios-default').value,
                     net: { mode: netModeEl.value },
-                    drives: { hda: hda ? descOf(hda) : null, hdb: hdb ? descOf(hdb) : null, cdrom: cdrom ? descOf(cdrom) : null }
+                    drives: { hda: hda ? descOf(hda) : null, hdb: hdb ? descOf(hdb) : null, cdrom: cdrom ? (cdrom.placeholder ? { placeholder: true } : descOf(cdrom)) : null }, xfer: false
                 };
 
                 if (rec) {
@@ -1100,6 +1360,11 @@
                     }
                 }
 
+                baseCd = cdrom || null;
+                if (resume && rec.config.xfer && baseCd) await emulator.set_cdrom({ buffer: baseCd, async: true });   // the sent files are gone: tell the OS the disc changed
+                xferBack.hidden = true; delete xferBack.dataset.on;
+                xferMsg.textContent = baseCd ? "Pick files here or drag them onto the screen to put them on a disc in the PC's CD/DVD drive." : "This saved PC has no virtual CD drive, so files can't be sent to it.";
+                xferBar.hidden = false;
                 emulator.run();
                 stopHeartbeat();
                 bootedAt = Date.now();
