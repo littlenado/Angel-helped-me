@@ -211,6 +211,7 @@
                             <option value="128">Windows NT 4.0 (128 MB)</option>
                             <option value="256">Windows 2000 (256 MB)</option>
                             <option value="512" selected>Windows XP (512 MB)</option>
+                            <option value="1024">Windows Vista / 7 (1024 MB)</option>
                             <option value="">Custom</option>
                         </select>
                     </div>
@@ -230,6 +231,7 @@
                     <label for="cpu-cap">CPU execution cap: <span id="cpu-cap-label">100%</span> <span class="hint">(applies instantly, even while running)</span></label>
                     <input type="range" id="cpu-cap" min="10" max="100" step="5" value="100">
                     <label class="hint" style="cursor:pointer"><input type="checkbox" id="jit-box" checked> JIT compiler on (turn off only if a guest crashes; it is much slower)</label>
+                    <label class="hint" style="cursor:pointer"><input type="checkbox" id="acpi-box"> ACPI + APIC on (needed by Windows Vista / 7 and newer; leave off for Windows 95, 98 and NT 4. XP works either way, but pick the same setting for its whole install)</label>
                     <div class="hint">CPU cores: 1. v86 emulates a single x86 processor, so there is no core count to change. The cap limits how much of your computer's CPU time the PC may use; it cannot make the PC faster than your computer allows.</div>
                 </div>
                 <div class="hint">RAM, video memory and the JIT switch take effect at the next boot. A resumed PC always uses the RAM and video memory it was saved with.</div>
@@ -651,7 +653,7 @@
 
         // ================= Hardware settings (RAM, video memory, CPU) =================
         const ramRange = $('ram-range'), ramInput = $('ram-input'), vramSel = $('vram-select');
-        const capRange = $('cpu-cap'), capLabel = $('cpu-cap-label'), jitBox = $('jit-box');
+        const capRange = $('cpu-cap'), capLabel = $('cpu-cap-label'), jitBox = $('jit-box'), acpiBox = $('acpi-box');
         const RAM_MIN = 16, RAM_MAX = 2048;
         function getRamMB() {
             const v = parseInt(ramInput.value);
@@ -677,7 +679,7 @@
             syncRamPreset(); ramInfo();
         });
         ramInput.addEventListener('change', () => setRamMB(getRamMB()));
-        osSelect.addEventListener('change', () => { if (osSelect.value) setRamMB(parseInt(osSelect.value)); });
+        osSelect.addEventListener('change', () => { if (osSelect.value) setRamMB(parseInt(osSelect.value)); if (osSelect.value === '1024') acpiBox.checked = true; });
         setRamMB(parseInt(osSelect.value) || 512);
 
         // Execution cap: the engine stretches the idle gap after each busy slice, so the PC gets only this share of CPU time.
@@ -1267,6 +1269,7 @@
             if (resume) {
                 setRamMB(rec.config.ram);
                 vramSel.value = String(rec.config.vram);
+                acpiBox.checked = !!rec.config.acpi;
                 if (rec.config.bios && [...$('bios-default').options].some(o => o.value === rec.config.bios)) $('bios-default').value = rec.config.bios;
             }
 
@@ -1309,7 +1312,7 @@
                     memory_size: ramMB * 1024 * 1024,
                     vga_memory_size: vramMB * 1024 * 1024,
                     disable_jit: jitBox.checked ? 0 : 1,
-                    acpi: false,
+                    acpi: !!acpiBox.checked,
                     autostart: false,        // we start it ourselves, after any saved disk data and state are in place
                 };
                 // async: true keeps big images out of memory and keeps disk contents out of the saved machine state.
@@ -1337,7 +1340,7 @@
                 emulator.v86.cpu_cap = capFraction();
 
                 machineConfig = {
-                    ram: ramMB, vram: vramMB, jit: !!jitBox.checked, bios: $('bios-default').value,
+                    ram: ramMB, vram: vramMB, jit: !!jitBox.checked, acpi: !!acpiBox.checked, bios: $('bios-default').value,
                     net: { mode: netModeEl.value },
                     drives: { hda: hda ? descOf(hda) : null, hdb: hdb ? descOf(hdb) : null, cdrom: cdrom ? (cdrom.placeholder ? { placeholder: true } : descOf(cdrom)) : null }, xfer: false
                 };
