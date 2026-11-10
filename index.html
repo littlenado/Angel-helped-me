@@ -1265,6 +1265,13 @@
                 if (f.size > FLOPPY_MAX) return fail(f.name + " is " + fmtBytes(f.size) + ", too big to be a floppy image. Put it in the CD/DVD or hard disk slot instead.");
             }
 
+            // ACPI decides which drivers Windows 2000 and newer load, so a saved PC must always start with the setting it was
+            // installed with, even when only its disk is kept (Power off). Otherwise Windows blue-screens with STOP 0x7B.
+            let acpiNote = '';
+            if (rec && !!rec.config.acpi !== !!acpiBox.checked) {
+                acpiBox.checked = !!rec.config.acpi;
+                acpiNote = " ACPI was set to " + (acpiBox.checked ? "on" : "off") + " to match the saved PC.";
+            }
             // A resumed PC must come back with the hardware it was saved with.
             if (resume) {
                 setRamMB(rec.config.ram);
@@ -1374,7 +1381,7 @@
                 lastSaveAt = 0;
                 const ps2 = emulator.v86.cpu.devices.ps2;
                 guestMouse = !!(ps2 && ps2.enable_mouse_stream);
-                setStatus(resume ? "Resumed the saved PC. Running." : "Running.");
+                setStatus((resume ? "Resumed the saved PC. Running." : "Running.") + acpiNote);
                 stopBtn.disabled = false;
                 setToolbar(true);
                 updateSaveButtons();
