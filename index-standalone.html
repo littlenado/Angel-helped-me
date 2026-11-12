@@ -2084,9 +2084,16 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 ({ hda, hdb, cdrom } = picked);
             }
 
+            // An installer CD or floppy with no hard disk has nowhere to install: offer a blank disk (Windows Setup otherwise reports
+            // "no drives found" and asks for a driver).
+            if (!hda && !hdb && !resume && (cdrom || fda || fdb) &&
+                confirm("No hard disk is selected, so an operating system installer would have nowhere to install (Windows Setup then says no drives were found and asks for a driver).\n\nPress OK to add a blank 10 GB hard disk and boot (recommended).\nPress Cancel to boot without a hard disk (for example for a live CD).")) {
+                hda = makeBlankDisk(10);
+                $('blank-hda').value = '10';
+                updateDiskWarn();
+            }
             const drives = [hda, hdb, cdrom, fda, fdb];
             if (!drives.some(Boolean)) return fail("Pick at least one disk: a CD/DVD, floppy or hard disk image.");
-            if (!hda && !hdb && !resume && !confirm("No hard disk is selected, so an operating system installer will have nowhere to install and will report that no drives or drivers were found.\n\nPress Cancel to go back and choose a blank disk for Hard disk A, or OK to boot without one.")) { startBtn.disabled = false; return; }
             for (const f of floppyDisks.concat(fdb ? [fdb] : [])) {
                 if (f.size > FLOPPY_MAX) return fail(f.name + " is " + fmtBytes(f.size) + ", too big to be a floppy image. Put it in the CD/DVD or hard disk slot instead.");
             }
