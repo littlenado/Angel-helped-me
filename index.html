@@ -273,6 +273,7 @@
                         <option value="786">Hard disk first</option>
                     </select>
                 </div>
+                <div id="resume-note" class="hint" style="grid-column: span 2; color:#8ab4f8; display:none"><span id="resume-text"></span> <button type="button" id="fresh-btn" class="clear" title="Delete the saved PC so the next boot is a brand new one">Start fresh (delete it)</button></div>
                 <div id="disk-warn" class="hint" style="grid-column: span 2; color:#fbbc04; display:none"></div>
                 <div class="btns">
                     <button id="save-btn" disabled title="Save the machine state now and keep running">Save state</button>
@@ -764,7 +765,8 @@
         function diskBuffer(slot) {
             if (!emulator || !emulator.v86) return null;
             const ide = emulator.v86.cpu.devices.ide;
-            const drive = slot === 'hda' ? ide.primary.master : ide.primary.slave;
+            const ch = ide && ide.primary;            // there is no primary channel when no hard disk is attached
+            const drive = ch && (slot === 'hda' ? ch.master : ch.slave);
             return drive && drive.buffer && drive.buffer.cx ? drive.buffer : null;
         }
         async function loadOverlay(name, slot, buf, onProgress) {
@@ -870,6 +872,14 @@
         // ---- Saved PC list and start-button label ----
         function refreshStartLabel() {
             const rec = savedCache.find(r => r.name === machineName());
+            const note = $('resume-note');
+            if (note) {
+                const show = !!(rec && storageOK && rememberBox.checked && !emulator);
+                note.style.display = show ? '' : 'none';
+                if (show) $('resume-text').textContent = rec.hasState
+                    ? "A saved PC named \"" + rec.name + "\" exists (saved " + ago(rec.savedAt) + "). Boot will RESUME it exactly where it was, not start a new one. If it is an old or stuck install, start fresh."
+                    : "A saved PC named \"" + rec.name + "\" exists (disk saved " + ago(rec.savedAt) + "). Boot will start from that saved disk, not a new blank one. Start fresh to get a new empty disk.";
+            }
             const remembered = storageOK && rememberBox.checked;
             startBtn.textContent = remembered && rec && rec.hasState ? "Resume saved PC" : "Boot Emulator";
             const info = $('saved-info');
@@ -913,6 +923,13 @@
                 }
             } catch (e) {}
         }
+        $('fresh-btn').addEventListener('click', async () => {
+            const n = machineName();
+            if (!confirm("Delete the saved PC \"" + n + "\" and everything saved for it, including its disk contents? The next boot will be a brand new PC.")) return;
+            try { await deleteMachine(n); } catch (e) { setStatus("Could not delete: " + e.message, true); return; }
+            await refreshSaved(); updateDiskWarn();
+            setStatus("Deleted the saved PC \"" + n + "\". The next boot starts fresh.");
+        });
         nameInput.addEventListener('input', refreshStartLabel);
         autosaveSel.addEventListener('change', () => { try { localStorage.setItem('v86-autosave', autosaveSel.value); } catch (e) {} });
         try { const a = localStorage.getItem('v86-autosave'); if (a !== null && [...autosaveSel.options].some(o => o.value === a)) autosaveSel.value = a; } catch (e) {}
@@ -1275,10 +1292,15 @@
                     if (sd && !f) {
                         if (sd.blank) picked[slot] = makeBlankDisk(sd.blank);
                         else return fail("The saved PC \"" + name + "\" used " + descText(sd) + " in " + where + ". Pick that same file there to continue (or delete the saved PC to start over).");
-                    } else if (sd && f && !sameDrive(descOf(f), sd)) {
-                        return fail("The saved PC \"" + name + "\" used " + descText(sd) + " in " + where + ", but you picked " + descText(descOf(f)) + ". Pick the original, use another PC name, or delete the saved PC to start over.");
-                    } else if (!sd && f && resume) {
-                        return fail("The saved PC \"" + name + "\" had nothing in " + where + ". Clear it to resume, or use another PC name.");
+                    } else if ((sd && f && !sameDrive(descOf(f), sd)) || (!sd && f && resume)) {
+                        const why = sd ? "used " + descText(sd) + " in " + where + ", but you picked " + descText(descOf(f)) + "."
+                                       : "was saved with nothing in " + where + ", but you picked " + descText(descOf(f)) + ".";
+                        if (confirm("The saved PC \"" + name + "\" " + why + "\n\nA saved PC keeps its own disks, so the new choice can't be added to it.\n\nPress OK to DELETE that saved PC and start a new one with the disks you picked now.\nPress Cancel to go back.")) {
+                            await deleteMachine(name);
+                            await refreshSaved();
+                            return bootMachine();
+                        }
+                        return fail("The saved PC \"" + name + "\" " + why + " Delete it in the Saved PC list to start over, or use another PC name.");
                     }
                 }
                 ({ hda, hdb, cdrom } = picked);
