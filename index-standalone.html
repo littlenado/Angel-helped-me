@@ -1111,6 +1111,11 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
         <input type="file" id="xfer-dir" webkitdirectory hidden>
         <span id="xfer-msg" class="hint">You can also drag files or folders onto the screen.</span>
     </div>
+    <div class="toolbar">
+        <button id="diag-btn" title="Copies a text report of the PC's settings and what the OS did with its disks. Paste it to whoever is helping you.">Copy report</button>
+        <span id="diag-msg" class="hint"></span>
+    </div>
+    <textarea id="diag-out" readonly hidden rows="14" spellcheck="false" style="width:calc(100% - 32px); max-width:850px; box-sizing:border-box; background:#202124; color:#e8eaed; border:1px solid #5f6368; border-radius:4px; font-family:Consolas,Menlo,monospace; font-size:12px; padding:8px;"></textarea>
     <div id="stats" class="stats"></div>
     <div id="status-text" class="status error">The page script has not started. If this message stays, your browser blocked or failed to run it (try reloading, or open it in a normal Chrome tab).</div>
 
@@ -2028,6 +2033,85 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             return parts.join(" | ");
         }
 
+        // ================= Diagnostics: what did the OS do with the disks? =================
+        const diag = { ata: {}, built: "2026-11-12" };
+        const diagRecs = new WeakMap();      // the emulator's drive objects are sealed, so records live beside them
+        function instrumentIde() {
+            diag.ata = {};
+            const ide = emulator && emulator.v86 && emulator.v86.cpu.devices.ide;
+            if (!ide) return;
+            let proto = null;
+            for (const [cn, ch] of [['primary', ide.primary], ['secondary', ide.secondary]]) {
+                if (!ch) { diag.ata[cn] = null; continue; }          // no hard disk / CD on this channel at all
+                for (const [dn, d] of [['master', ch.master], ['slave', ch.slave]]) {
+                    const rec = diag.ata[cn + ' ' + dn] = { connected: !!(d && d.buffer), atapi: !!(d && d.is_atapi), size: d && d.buffer ? d.buffer.byteLength : 0, cmds: {}, packets: {}, last: [] };
+                    if (d) { diagRecs.set(d, rec); proto = Object.getPrototypeOf(d); }
+                }
+            }
+            if (proto && !proto.__diagWrapped) {
+                const hex = n => '0x' + (n & 255).toString(16).padStart(2, '0');
+                const oa = proto.ata_command, op = proto.atapi_handle;
+                proto.ata_command = function (c) {
+                    const r = diagRecs.get(this);
+                    if (r) { const k = hex(c); r.cmds[k] = (r.cmds[k] || 0) + 1; r.last.push(k); if (r.last.length > 30) r.last.shift(); }
+                    return oa.apply(this, arguments);
+                };
+                if (op) proto.atapi_handle = function () {
+                    const r = diagRecs.get(this);
+                    if (r) { const k = hex(this.data[0]); r.packets[k] = (r.packets[k] || 0) + 1; }
+                    return op.apply(this, arguments);
+                };
+                proto.__diagWrapped = true;
+            }
+        }
+        const ATA_NAMES = { '0x20': 'READ SECTORS', '0x24': 'READ SECTORS EXT', '0x25': 'READ DMA EXT', '0x29': 'READ MULTIPLE EXT', '0x2f': 'READ LOG EXT', '0x30': 'WRITE SECTORS', '0x34': 'WRITE SECTORS EXT', '0x35': 'WRITE DMA EXT',
+            '0x39': 'WRITE MULTIPLE EXT', '0x40': 'READ VERIFY', '0x42': 'READ VERIFY EXT', '0x90': 'EXECUTE DIAGNOSTIC', '0x91': 'INIT DRIVE PARAMS', '0xa0': 'PACKET', '0xa1': 'IDENTIFY PACKET', '0xc4': 'READ MULTIPLE', '0xc5': 'WRITE MULTIPLE',
+            '0xc6': 'SET MULTIPLE', '0xc8': 'READ DMA', '0xca': 'WRITE DMA', '0xe0': 'STANDBY NOW', '0xe1': 'IDLE IMMEDIATE', '0xe7': 'FLUSH CACHE', '0xea': 'FLUSH CACHE EXT', '0xec': 'IDENTIFY', '0xef': 'SET FEATURES', '0xf8': 'READ NATIVE MAX', '0xb0': 'SMART', '0x08': 'DEVICE RESET', '0x10': 'RECALIBRATE', '0x70': 'SEEK' };
+        function buildReport() {
+            const L = [];
+            const ok = (f, d) => { try { return f(); } catch (e) { return d; } };
+            L.push("PC report (page build " + diag.built + ")  " + new Date().toString());
+            L.push("Browser: " + navigator.userAgent);
+            L.push("Status line: " + $('status-text').textContent);
+            L.push("");
+            L.push("Settings: RAM " + getRamMB() + " MB | video " + (vramSel.value) + " MB | ACPI " + (acpiBox.checked ? "on" : "off") + " | JIT " + (jitBox.checked ? "on" : "off") + " | CPU cap " + capRange.value + "% | boot order " + ($('boot-select').selectedOptions[0] || {}).text);
+            L.push("Boot button says: " + startBtn.textContent + " | Remember: " + rememberBox.checked + " | autosave: " + autosaveSel.value + " min | PC name: " + machineName());
+            const rec = savedCache.find(r => r.name === machineName());
+            L.push("Saved PC record: " + (rec ? JSON.stringify({ hasState: rec.hasState, savedAt: new Date(rec.savedAt).toString(), drives: rec.config && rec.config.drives, acpi: rec.config && rec.config.acpi, ram: rec.config && rec.config.ram }) : "none"));
+            L.push("Chosen in the page: hard disk A file=" + ($('local-hda').files[0] ? $('local-hda').files[0].name : "-") + " blank=" + ($('blank-hda').value || "-") + " | hard disk B file=" + ($('local-hdb').files[0] ? $('local-hdb').files[0].name : "-") + " | CD=" + ($('local-cdrom').files[0] ? $('local-cdrom').files[0].name + " (" + fmtBytes($('local-cdrom').files[0].size) + ")" : "-") + " | floppy A=" + ($('local-fda').files[0] ? $('local-fda').files[0].name : "-"));
+            L.push("");
+            if (!emulator) { L.push("The PC is not running."); return L.join("\n"); }
+            L.push("PC is " + (emulator.is_running() ? "running" : "paused") + ". " + $('stats').innerText.replace(/\n+/g, "\n  "));
+            L.push("");
+            L.push("Disk controller as the OS sees it (what is physically attached, and every ATA command the OS sent):");
+            const ide = ok(() => emulator.v86.cpu.devices.ide, null);
+            if (!ide) L.push("  no IDE controller");
+            else for (const cn of ['primary', 'secondary']) {
+                if (diag.ata[cn] === null || (diag.ata[cn] === undefined && !ide[cn])) { L.push("  " + cn + " channel: NOT PRESENT (nothing is attached to it)"); continue; }
+                for (const dn of ['master', 'slave']) {
+                    const r = diag.ata[cn + ' ' + dn]; if (!r) continue;
+                    const cmds = Object.entries(r.cmds).map(([k, n]) => (ATA_NAMES[k] || k) + " x" + n).join(", ") || "none";
+                    L.push("  " + cn + " " + dn + ": " + (r.connected ? (r.atapi ? "CD/DVD drive" : "hard disk " + fmtBytes(r.size)) : "empty") + " | commands from the OS: " + cmds);
+                    if (r.connected && r.atapi) L.push("      CD packet commands: " + (Object.entries(r.packets).map(([k, n]) => k + " x" + n).join(", ") || "none"));
+                    if (r.connected) L.push("      last commands: " + (r.last.map(k => ATA_NAMES[k] || k).join(" > ") || "none"));
+                }
+            }
+            const rs = ok(() => { const m = emulator.v86.cpu.mem8; const t = (i, n) => String.fromCharCode(...Array.from({ length: n }, (_, k) => m[i + k]));
+                for (let i = 0xE0000; i < 0x100000; i += 16) if (t(i, 8) === 'RSD PTR ') { const a = (m[i + 16] | m[i + 17] << 8 | m[i + 18] << 16 | m[i + 19] << 24) >>> 0; const len = m[a + 4] | m[a + 5] << 8; const e = []; for (let o = 36; o < len; o += 4) e.push(t((m[a + o] | m[a + o + 1] << 8 | m[a + o + 2] << 16 | m[a + o + 3] << 24) >>> 0, 4)); return t(a, 4) + " -> " + e.join(", "); }
+                return "no ACPI tables"; }, "unknown");
+            L.push("");
+            L.push("ACPI tables in guest memory: " + rs);
+            return L.join("\n");
+        }
+        $('diag-btn').addEventListener('click', async () => {
+            const text = buildReport(), box = $('diag-out');
+            box.hidden = false; box.value = text; box.focus(); box.select();
+            let copied = false;
+            try { await navigator.clipboard.writeText(text); copied = true; } catch (e) {}
+            $('diag-msg').textContent = copied ? "Report copied. Paste it into the chat." : "Press Ctrl+C to copy the report below, then paste it into the chat.";
+            box.scrollIntoView({ block: 'nearest' });
+        });
+
         // ================= Start / stop =================
         function stopEmulator() {
             stopHeartbeat();
@@ -2230,6 +2314,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 xferBack.hidden = true; delete xferBack.dataset.on;
                 xferMsg.textContent = baseCd ? "Pick files here or drag them onto the screen to put them on a disc in the PC's CD/DVD drive." : "This saved PC has no virtual CD drive, so files can't be sent to it.";
                 xferBar.hidden = false;
+                try { instrumentIde(); } catch (e) { console.warn("diagnostics unavailable", e); }
                 emulator.run();
                 stopHeartbeat();
                 bootedAt = Date.now();
