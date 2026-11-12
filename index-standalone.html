@@ -1073,6 +1073,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                         <option value="786">Hard disk first</option>
                     </select>
                 </div>
+                <div id="disk-warn" class="hint" style="grid-column: span 2; color:#fbbc04; display:none"></div>
                 <div class="btns">
                     <button id="save-btn" disabled title="Save the machine state now and keep running">Save state</button>
                     <button id="suspend-btn" disabled title="Save the machine state, then stop. Resume later exactly where you left off">Save &amp; stop</button>
@@ -1704,6 +1705,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 list.appendChild(row);
             }
             refreshStartLabel();
+            try { updateDiskWarn(); } catch (e) {}
             try {
                 if (navigator.storage && navigator.storage.estimate) {
                     const e = await navigator.storage.estimate();
@@ -1986,6 +1988,29 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             sendFiles(ens.length ? await readDropped(ens) : Array.from(e.dataTransfer.files).map(f => ({ path: f.name, file: f })));
         });
 
+        // ---- Warn early when no hard disk is attached (Windows Setup then finds nothing to install to) ----
+        const diskWarn = $('disk-warn');
+        function updateDiskWarn() {
+            const hasHd = ['hda', 'hdb'].some(sl => $('local-' + sl).files[0] || parseInt($('blank-' + sl).value));
+            const hasOther = $('local-cdrom').files[0] || $('local-fda').files[0];
+            const resuming = !!(storageOK && rememberBox.checked && savedCache.some(r => r.name === machineName()));
+            diskWarn.style.display = (!hasHd && hasOther && !resuming) ? '' : 'none';
+            diskWarn.textContent = "No hard disk is selected. To install an operating system, set Hard disk A to \"Blank 2 GB\" or \"Blank 10 GB\" (the dropdown next to its file picker) before pressing Boot. Without one, Windows Setup shows no drives and asks for a driver.";
+        }
+        ['local-hda', 'local-hdb', 'local-cdrom', 'local-fda', 'blank-hda', 'blank-hdb'].forEach(id => $(id).addEventListener('change', updateDiskWarn));
+        document.querySelectorAll('.clear').forEach(b => b.addEventListener('click', () => setTimeout(updateDiskWarn, 0)));
+        nameInput.addEventListener('input', updateDiskWarn);
+        updateDiskWarn();
+        function driveSummary(hda, hdb, cdrom, fda) {
+            const dn = f => !f ? null : f.placeholder ? null : f.blankGB ? "blank " + f.blankGB + " GB disk" : f.name + " (" + fmtBytes(f.size) + ")";
+            const parts = [];
+            parts.push("Hard disk A: " + (dn(hda) || "none"));
+            if (hdb) parts.push("Hard disk B: " + dn(hdb));
+            parts.push("CD/DVD: " + (dn(cdrom) || "empty"));
+            if (fda) parts.push("Floppy: " + dn(fda));
+            return parts.join(" | ");
+        }
+
         // ================= Start / stop =================
         function stopEmulator() {
             stopHeartbeat();
@@ -2061,6 +2086,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
 
             const drives = [hda, hdb, cdrom, fda, fdb];
             if (!drives.some(Boolean)) return fail("Pick at least one disk: a CD/DVD, floppy or hard disk image.");
+            if (!hda && !hdb && !resume && !confirm("No hard disk is selected, so an operating system installer will have nowhere to install and will report that no drives or drivers were found.\n\nPress Cancel to go back and choose a blank disk for Hard disk A, or OK to boot without one.")) { startBtn.disabled = false; return; }
             for (const f of floppyDisks.concat(fdb ? [fdb] : [])) {
                 if (f.size > FLOPPY_MAX) return fail(f.name + " is " + fmtBytes(f.size) + ", too big to be a floppy image. Put it in the CD/DVD or hard disk slot instead.");
             }
@@ -2181,7 +2207,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 lastSaveAt = 0;
                 const ps2 = emulator.v86.cpu.devices.ps2;
                 guestMouse = !!(ps2 && ps2.enable_mouse_stream);
-                setStatus((resume ? "Resumed the saved PC. Running." : "Running.") + acpiNote);
+                setStatus((resume ? "Resumed the saved PC. Running." : "Running.") + acpiNote + "  " + driveSummary(hda, hdb, cdrom, fda));
                 stopBtn.disabled = false;
                 setToolbar(true);
                 updateSaveButtons();
