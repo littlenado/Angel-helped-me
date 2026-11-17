@@ -290,6 +290,7 @@
         <button id="fs-btn" disabled>Fullscreen</button>
         <button id="mouse-btn" disabled>Capture mouse</button>
         <button id="cad-btn" disabled>Ctrl+Alt+Del</button>
+        <button id="sf10-btn" disabled title="Opens a Command Prompt inside Windows Setup (Chromebook keyboards often can't send this key)">Shift+F10</button>
         <span id="mouse-hint" class="hint"></span>
     </div>
     <div id="floppy-bar" class="toolbar" hidden>
@@ -497,9 +498,9 @@
         }
 
         // ---- Screen toolbar: fullscreen, mouse capture, Ctrl+Alt+Del ----
-        const fsBtn = $('fs-btn'), mouseBtn = $('mouse-btn'), cadBtn = $('cad-btn'), mouseHint = $('mouse-hint');
+        const fsBtn = $('fs-btn'), mouseBtn = $('mouse-btn'), cadBtn = $('cad-btn'), sf10Btn = $('sf10-btn'), mouseHint = $('mouse-hint');
         let guestMouse = false;
-        function setToolbar(on) { fsBtn.disabled = mouseBtn.disabled = cadBtn.disabled = !on; }
+        function setToolbar(on) { fsBtn.disabled = mouseBtn.disabled = cadBtn.disabled = sf10Btn.disabled = !on; }
         function updateMouseHint() {
             const locked = !!document.pointerLockElement;
             mouseBtn.textContent = locked ? "Release mouse (Esc)" : "Capture mouse";
@@ -521,6 +522,10 @@
         cadBtn.addEventListener('click', () => {
             // Ctrl down, Alt down, Del down/up (extended), Alt up, Ctrl up
             if (emulator) emulator.keyboard_send_scancodes([0x1D, 0x38, 0xE0, 0x53, 0xE0, 0xD3, 0xB8, 0x9D]);
+        });
+        sf10Btn.addEventListener('click', () => {
+            // Shift down, F10 down, F10 up, Shift up
+            if (emulator) emulator.keyboard_send_scancodes([0x2A, 0x44, 0xC4, 0xAA]);
         });
         fsBtn.addEventListener('click', async () => {
             if (!emulator) return;
