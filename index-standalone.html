@@ -966,11 +966,11 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
                 </div>
                 <div class="row">
                     <label for="local-hda">Hard disk A (.img / .raw), or a blank disk made on the spot:</label>
-                    <div class="filerow"><input type="file" id="local-hda" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hda" title="Clear this drive">&times;</button> <select id="blank-hda" class="blank" title="Use a blank virtual disk instead of a file"><option value="">or blank disk...</option><option value="2">Blank 2 GB</option><option value="10">Blank 10 GB</option></select></div>
+                    <div class="filerow"><input type="file" id="local-hda" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hda" title="Clear this drive">&times;</button> <select id="blank-hda" class="blank" title="Use a blank virtual disk instead of a file"><option value="">or blank disk...</option><option value="2">Blank 2 GB</option><option value="10">Blank 10 GB</option><option value="20">Blank 20 GB</option><option value="32">Blank 32 GB</option></select></div>
                 </div>
                 <div class="row">
                     <label for="local-hdb">Hard disk B (optional):</label>
-                    <div class="filerow"><input type="file" id="local-hdb" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hdb" title="Clear this drive">&times;</button> <select id="blank-hdb" class="blank" title="Use a blank virtual disk instead of a file"><option value="">or blank disk...</option><option value="2">Blank 2 GB</option><option value="10">Blank 10 GB</option></select></div>
+                    <div class="filerow"><input type="file" id="local-hdb" accept=".iso,.img,.ima,.dsk,.vfd,.flp,.bin,.raw"><button type="button" class="clear" data-for="local-hdb" title="Clear this drive">&times;</button> <select id="blank-hdb" class="blank" title="Use a blank virtual disk instead of a file"><option value="">or blank disk...</option><option value="2">Blank 2 GB</option><option value="10">Blank 10 GB</option><option value="20">Blank 20 GB</option><option value="32">Blank 32 GB</option></select></div>
                 </div>
                 <div class="hint">Blank disks start empty and cost no storage: only what the OS writes is kept, in memory, so everything on them is lost when you press Stop or close the page. Windows 2000/XP Setup can partition and format a blank disk itself (pick the quick format). Windows 95/98 need FDISK and FORMAT first. Installing XP can use 1-2 GB of memory on top of the emulator's own.</div>
             </div>
@@ -2017,7 +2017,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             const hasOther = $('local-cdrom').files[0] || $('local-fda').files[0];
             const resuming = !!(storageOK && rememberBox.checked && savedCache.some(r => r.name === machineName()));
             diskWarn.style.display = (!hasHd && hasOther && !resuming) ? '' : 'none';
-            diskWarn.textContent = "No hard disk is selected. To install an operating system, set Hard disk A to \"Blank 2 GB\" or \"Blank 10 GB\" (the dropdown next to its file picker) before pressing Boot. Without one, Windows Setup shows no drives and asks for a driver.";
+            diskWarn.textContent = "No hard disk is selected. To install an operating system, set Hard disk A to a blank disk such as \"Blank 20 GB\" (the dropdown next to its file picker) before pressing Boot. Without one, Windows Setup shows no drives and asks for a driver.";
         }
         ['local-hda', 'local-hdb', 'local-cdrom', 'local-fda', 'blank-hda', 'blank-hdb'].forEach(id => $(id).addEventListener('change', updateDiskWarn));
         document.querySelectorAll('.clear').forEach(b => b.addEventListener('click', () => setTimeout(updateDiskWarn, 0)));
@@ -2078,7 +2078,7 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             L.push("Boot button says: " + startBtn.textContent + " | Remember: " + rememberBox.checked + " | autosave: " + autosaveSel.value + " min | PC name: " + machineName());
             const rec = savedCache.find(r => r.name === machineName());
             L.push("Saved PC record: " + (rec ? JSON.stringify({ hasState: rec.hasState, savedAt: new Date(rec.savedAt).toString(), drives: rec.config && rec.config.drives, acpi: rec.config && rec.config.acpi, ram: rec.config && rec.config.ram }) : "none"));
-            L.push("Chosen in the page: hard disk A file=" + ($('local-hda').files[0] ? $('local-hda').files[0].name : "-") + " blank=" + ($('blank-hda').value || "-") + " | hard disk B file=" + ($('local-hdb').files[0] ? $('local-hdb').files[0].name : "-") + " | CD=" + ($('local-cdrom').files[0] ? $('local-cdrom').files[0].name + " (" + fmtBytes($('local-cdrom').files[0].size) + ")" : "-") + " | floppy A=" + ($('local-fda').files[0] ? $('local-fda').files[0].name : "-"));
+            L.push("Chosen in the page: hard disk A file=" + ($('local-hda').files[0] ? $('local-hda').files[0].name : "-") + " blank=" + ($('blank-hda').value || "-") + " | hard disk B file=" + ($('local-hdb').files[0] ? $('local-hdb').files[0].name : "-") + " blank=" + ($('blank-hdb').value || "-") + " | CD=" + ($('local-cdrom').files[0] ? $('local-cdrom').files[0].name + " (" + fmtBytes($('local-cdrom').files[0].size) + ")" : "-") + " | floppy A=" + ($('local-fda').files[0] ? $('local-fda').files[0].name : "-"));
             L.push("");
             if (!emulator) { L.push("The PC is not running."); return L.join("\n"); }
             L.push("PC is " + (emulator.is_running() ? "running" : "paused") + ". " + $('stats').innerText.replace(/\n+/g, "\n  "));
@@ -2193,9 +2193,9 @@ this.socket.onerror=this.handle_error.bind(this)}}};nd.prototype.send=function(a
             // An installer CD or floppy with no hard disk has nowhere to install: offer a blank disk (Windows Setup otherwise reports
             // "no drives found" and asks for a driver).
             if (!hda && !hdb && !resume && (cdrom || fda || fdb) &&
-                confirm("No hard disk is selected, so an operating system installer would have nowhere to install (Windows Setup then says no drives were found and asks for a driver).\n\nPress OK to add a blank 10 GB hard disk and boot (recommended).\nPress Cancel to boot without a hard disk (for example for a live CD).")) {
-                hda = makeBlankDisk(10);
-                $('blank-hda').value = '10';
+                confirm("No hard disk is selected, so an operating system installer would have nowhere to install (Windows Setup then says no drives were found and asks for a driver).\n\nPress OK to add a blank 20 GB hard disk and boot (recommended).\nPress Cancel to boot without a hard disk (for example for a live CD).")) {
+                hda = makeBlankDisk(20);
+                $('blank-hda').value = '20';
                 updateDiskWarn();
             }
             const drives = [hda, hdb, cdrom, fda, fdb];
