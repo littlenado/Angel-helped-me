@@ -1,0 +1,41 @@
+name: Standalone build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build index-standalone.html
+        run: node tools/build-standalone.js
+
+      - name: Keep a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-standalone
+          path: index-standalone.html
+
+      - name: Publish or update the standalone release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: standalone
+          name: Standalone build
+          body: |
+            Single-file v86runner build. The 32-bit and x86-64 engines, SeaBIOS and
+            the VGA BIOS are embedded, so the file runs from disk with no other files.
+          files: index-standalone.html
+          make_latest: true
