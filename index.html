@@ -396,7 +396,8 @@
 
         function stopHeartbeat() { if (heartbeat) { clearInterval(heartbeat); heartbeat = null; } }
         const benign = m => /worklet|pointer.?lock|exited the lock|keyboard.?lock/i.test(String(m));   // audio worklet can't load from file://; harmless
-        window.addEventListener('error', e => { if (!benign(e.message)) { stopHeartbeat(); setStatus("Script error: " + e.message, true); } });
+        window.lastScriptError = null;
+        window.addEventListener('error', e => { if (!benign(e.message)) { stopHeartbeat(); window.lastScriptError = { msg: e.message, file: e.filename, line: e.lineno, col: e.colno, stack: e.error && e.error.stack, at: Date.now() }; setStatus("Script error: " + e.message, true); } });
         window.addEventListener('unhandledrejection', e => {
             const m = (e.reason && e.reason.message) || e.reason;
             if (!benign(m)) { stopHeartbeat(); setStatus("Error: " + m, true); }
@@ -1288,7 +1289,7 @@
         }
 
         // ================= Diagnostics: what did the OS do with the disks? =================
-        const diag = { ata: {}, built: "2026-11-19" };
+        const diag = { ata: {}, built: "2026-11-20" };
         const diagRecs = new WeakMap();      // the emulator's drive objects are sealed, so records live beside them
         function instrumentIde() {
             diag.ata = {};
@@ -1329,6 +1330,7 @@
             L.push("Status line: " + $('status-text').textContent);
             L.push("");
             L.push("Settings: CPU " + (isX64() ? "64-bit (x86-64)" : "32-bit (x86)") + " | RAM " + getRamMB() + " MB | video " + (vramSel.value) + " MB | ACPI " + (acpiBox.checked ? "on" : "off") + " | JIT " + (jitBox.checked ? "on" : "off") + " | CPU cap " + capRange.value + "% | boot order " + ($('boot-select').selectedOptions[0] || {}).text);
+            if (window.lastScriptError) { const x = window.lastScriptError; L.push("Last script error: " + x.msg + " at " + String(x.file || "").slice(-40) + ":" + x.line + ":" + x.col); L.push(String(x.stack || "(no stack)").split("\n").slice(0, 12).map(t => "    " + t.slice(0, 200)).join("\n")); }
             L.push("Engines: 32-bit " + (typeof window.V86_32 === "function" ? "loaded" : "missing") + " | 64-bit " + (typeof window.V86_64 === "function" ? "loaded" : "missing") + " | standalone " + (!!window.EMBEDDED));
             L.push("Boot button says: " + startBtn.textContent + " | Remember: " + rememberBox.checked + " | autosave: " + autosaveSel.value + " min | PC name: " + machineName());
             const rec = savedCache.find(r => r.name === machineName());
