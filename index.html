@@ -1330,7 +1330,7 @@
             L.push("Status line: " + $('status-text').textContent);
             L.push("");
             L.push("Settings: CPU " + (isX64() ? "64-bit (x86-64)" : "32-bit (x86)") + " | RAM " + getRamMB() + " MB | video " + (vramSel.value) + " MB | ACPI " + (acpiBox.checked ? "on" : "off") + " | JIT " + (jitBox.checked ? "on" : "off") + " | CPU cap " + capRange.value + "% | boot order " + ($('boot-select').selectedOptions[0] || {}).text);
-            if (window.lastScriptError) { const x = window.lastScriptError; L.push("Last script error: " + x.msg + " at " + String(x.file || "").slice(-40) + ":" + x.line + ":" + x.col); L.push(String(x.stack || "(no stack)").split("\n").slice(0, 12).map(t => "    " + t.slice(0, 200)).join("\n")); }
+            if (window.lastScriptError) { const x = window.lastScriptError; L.push("Last script error (" + Math.round((Date.now() - x.at) / 1000) + " s ago; may be old): " + x.msg + " at " + String(x.file || "").slice(-40) + ":" + x.line + ":" + x.col); L.push(String(x.stack || "(no stack)").split("\n").slice(0, 12).map(t => "    " + t.slice(0, 200)).join("\n")); }
             L.push("Engines: 32-bit " + (typeof window.V86_32 === "function" ? "loaded" : "missing") + " | 64-bit " + (typeof window.V86_64 === "function" ? "loaded" : "missing") + " | standalone " + (!!window.EMBEDDED));
             L.push("Boot button says: " + startBtn.textContent + " | Remember: " + rememberBox.checked + " | autosave: " + autosaveSel.value + " min | PC name: " + machineName());
             const rec = savedCache.find(r => r.name === machineName());
