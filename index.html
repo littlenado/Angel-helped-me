@@ -497,7 +497,7 @@
             e.preventDefault();
             if (e.dataTransfer && e.dataTransfer.files.length) autoAssign(e.dataTransfer.files);
         });
-        document.querySelectorAll('.clear').forEach(btn => btn.addEventListener('click', () => {
+        document.querySelectorAll('.clear[data-for]').forEach(btn => btn.addEventListener('click', () => {
             $(btn.dataset.for).value = '';
             const blank = $('blank-' + btn.dataset.for.replace('local-', ''));
             if (blank) blank.value = '';
@@ -1275,7 +1275,7 @@
             diskWarn.textContent = "No hard disk is selected. A blank 20 GB disk will be added automatically when you press Boot, so an installer has somewhere to install. To choose a different size (or none), use the dropdown next to Hard disk A.";
         }
         ['local-hda', 'local-hdb', 'local-cdrom', 'local-fda', 'blank-hda', 'blank-hdb'].forEach(id => $(id).addEventListener('change', updateDiskWarn));
-        document.querySelectorAll('.clear').forEach(b => b.addEventListener('click', () => setTimeout(updateDiskWarn, 0)));
+        document.querySelectorAll('.clear[data-for]').forEach(b => b.addEventListener('click', () => setTimeout(updateDiskWarn, 0)));
         nameInput.addEventListener('input', updateDiskWarn);
         updateDiskWarn();
         function driveSummary(hda, hdb, cdrom, fda) {
